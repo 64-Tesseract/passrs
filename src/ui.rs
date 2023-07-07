@@ -1,22 +1,19 @@
 use std::io::{self, stdout, Write};
 use std::{cmp, ops::Range};
-use crossterm::{queue, cursor, event::{Event::{self, Key}, KeyCode::{self, *}}, style, terminal};
+use crossterm::{queue, cursor, event::{Event::{self, Key}, KeyCode::{self, *}, KeyModifiers}, style, terminal};
 
 
 #[derive(PartialEq)]
 pub enum AfterAction {
-    Up,
-    Down,
     Enter,
     Cancel,
-    Quit,
     Continue,
 }
 
-pub fn input_string(string: &mut String, index: &mut usize, ev: &Event) -> AfterAction {
-    match input_key(ev) {
+pub fn input_string(string: &mut String, index: &mut usize, keyev: &KeyCode) -> AfterAction {
+    match keyev {
         Char(chr) => {
-            string.insert(*index, chr);
+            string.insert(*index, *chr);
             *index += 1;
         },
         Left => {
@@ -39,12 +36,6 @@ pub fn input_string(string: &mut String, index: &mut usize, ev: &Event) -> After
             if string.len() != 0 && *index < string.len() {
                 string.remove(*index);
             }
-        },
-        Up => {
-            return AfterAction::Up;
-        },
-        Down => {
-            return AfterAction::Down;
         },
         Enter => {
             return AfterAction::Enter;
@@ -102,6 +93,6 @@ pub fn visible_scrolled(size: u16, length: usize, selected: usize) -> Range<usiz
     return view..(view + size);
     */
     
-    let view = (selected as f32 / length as f32 * (length - size + 1) as f32) as usize;
+    let view = ((selected + 1) as f32 / length as f32 * (length - size) as f32) as usize;
     return view..(view + size);
 }
