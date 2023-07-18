@@ -134,7 +134,7 @@ fn main() {
         //dbg!(password_set);
 
         for x in 0..100 {
-            password_set.totp.push(totp::TotpCode::new(format!("{}", x)));
+            password_set.totp.push(totp::TotpCode::new());
         }
 
         main_ui(&mut password_set);
@@ -144,6 +144,7 @@ fn main() {
     execute!(stdout,
              terminal::EnableLineWrap,
              terminal::LeaveAlternateScreen);
+    stdout.flush();
 }
 
 fn main_ui(password_set: &mut Passwords) {
@@ -191,17 +192,17 @@ fn main_ui(password_set: &mut Passwords) {
                         }
                     }
 
-                    let main_width = size.0 as usize - 10;
                     for (index, y_pos) in view.zip(1..size.1) {
-
                         let this_totp = &password_set.totp[index];
+                        let main_width = size.0 as usize - 4 - this_totp.digits;
+
                         let totp_string =
                             if show_all || index == *list_scroll {
                                 let this_totp_code = this_totp.get_code(totp_next);
                                 format!(" {name:width$} {code1} {code2} ",
                                         name = this_totp.name,
-                                        code1 = this_totp_code[..3].to_string(),
-                                        code2 = this_totp_code[3..].to_string(),
+                                        code1 = this_totp_code[..this_totp.digits / 2].to_string(),
+                                        code2 = this_totp_code[this_totp.digits / 2..].to_string(),
                                         width = main_width)
                             } else {
                                 format!(" {}", this_totp.name)
@@ -273,11 +274,19 @@ fn main_ui(password_set: &mut Passwords) {
                 KeyCode::Char('e') => {
                     match tab {
                         Tab::Password => {
-                            if let Some(p) = pass_edit_ui(Some(&password_set.pass[pass_scroll])) {
-                                password_set.pass[pass_scroll] = p;
+                            if password_set.pass.len() != 0 {
+                                if let Some(p) = pass_edit_ui(Some(&password_set.pass[pass_scroll])) {
+                                    password_set.pass[pass_scroll] = p;
+                                }
                             }
                         },
-                        _ => {},
+                        Tab::Totp => {
+                            if password_set.totp.len() != 0 {
+                                if let Some(p) = totp_edit_ui(Some(&password_set.totp[totp_scroll])) {
+                                    password_set.totp[totp_scroll] = p;
+                                }
+                            }
+                        },
                     }
                 },
                 _ => {},
@@ -312,6 +321,8 @@ fn pass_edit_ui(pass: Option<&pass::Password>) -> Option<pass::Password> {
                cursor::MoveTo(1, 3),
                style::Print(&new_pass.name));
 
+        stdout.flush();
+
         if let Ok(true) = event::poll(POLL_TIME) {
             let ev = event::read().unwrap();
             let keyev = ui::input_key(&ev);
@@ -323,22 +334,17 @@ fn pass_edit_ui(pass: Option<&pass::Password>) -> Option<pass::Password> {
                 KeyCode::Enter => {
                     return Some(new_pass);
                 },
-                KeyCode::Up => {
-                     if selected == 0 {
-                         selected = 2;
-                     } else {
-                         selected -= 1;
-                     }
-                },
-                KeyCode::Up => {
-                    selected = (selected + 1) % 3;
+                KeyCode::Tab => {
+                    selected = (selected + 1) % 2;
                 },
                 _ => {
                     match selected {
                         0 => {
                             ui::input_string(&mut new_pass.name, &mut string_index, &keyev);
                         },
-                        _ => {},
+                        1 => {
+                        },
+                        _ => panic!("How did we get here?"),
                     }
                 }
             }
@@ -346,7 +352,7 @@ fn pass_edit_ui(pass: Option<&pass::Password>) -> Option<pass::Password> {
     }
 }
 
-fn totp_edit_ui(pass: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
+fn totp_edit_ui(totp: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
     use event::{Event, KeyCode};
 
     let mut stdout = io::stdout();
@@ -366,11 +372,33 @@ fn totp_edit_ui(pass: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
         queue!(stdout,
                terminal::Clear(terminal::ClearType::All),
                cursor::MoveTo(ui::center_offset(size.0, -7), 0),
-               style::Print("Edit TOTP Code"),
-               cursor::MoveTo(1, 2),
-               style::Print("Name:"),
-               cursor::MoveTo(1, 3),
-               style::Print(&new_totp.name));
+               style::Print("Edit TOTP Code"));
+
+        match selected {
+            0 => {
+                queue!(stdout,
+                       cursor::MoveTo(1, 2),
+                       style::Print("Name:"));
+                ui::print_typing(1, 3, &new_totp.name, Some(string_index));
+            },
+            1 => {
+                queue!(stdout,
+                       cursor::MoveTo(1, 2),
+                       style::Print("Digits:"),
+                       cursor::MoveTo(1, 3),
+                       style::Print(&new_totp.digits));
+            },
+            2 => {
+                queue!(stdout,
+                       cursor::MoveTo(1, 2),
+                       style::Print("Secret:"),
+                       cursor::MoveTo(1, 3),
+                       style::Print(&new_totp.secret));
+            },
+            _ => panic!("How did we get here?"),
+        }
+
+        stdout.flush();
 
         if let Ok(true) = event::poll(POLL_TIME) {
             let ev = event::read().unwrap();
@@ -381,24 +409,34 @@ fn totp_edit_ui(pass: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
                     return None;
                 },
                 KeyCode::Enter => {
-                    return Some(new_pass);
+                    return Some(new_totp);
                 },
-                KeyCode::Up => {
-                     if selected == 0 {
-                         selected = 2;
-                     } else {
-                         selected -= 1;
-                     }
-                },
-                KeyCode::Up => {
-                    selected = (selected + 1) % 2;
+                KeyCode::Tab => {
+                    selected = (selected + 1) % 3;
                 },
                 _ => {
                     match selected {
                         0 => {
-                            ui::input_string(&mut new_pass.name, &mut string_index, &keyev);
+                            ui::input_string(&mut new_totp.name, &mut string_index, &keyev);
                         },
-                        _ => {},
+                        1 => {
+                            match keyev {
+                                KeyCode::Left => {
+                                    if new_totp.digits > 4 {
+                                        new_totp.digits -= 1;
+                                    }
+                                },
+                                KeyCode::Right => {
+                                    if new_totp.digits < 8 {
+                                        new_totp.digits += 1;
+                                    }
+                                },
+                                _ => {},
+                            }
+                        },
+                        2 => {
+                        },
+                        _ => panic!("How did we get here?"),
                     }
                 }
             }

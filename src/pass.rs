@@ -8,6 +8,6 @@ pub struct Password {
 
 impl Password {
     pub fn new() -> Password {
-        Password { name: String::new(), password: String::new() }
+        Password { name: "New Password".to_string(), password: String::new() }
     }
 }

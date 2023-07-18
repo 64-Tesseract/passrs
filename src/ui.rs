@@ -13,28 +13,29 @@ pub enum AfterAction {
 pub fn input_string(string: &mut String, index: &mut usize, keyev: &KeyCode) -> AfterAction {
     match keyev {
         Char(chr) => {
-            string.insert(*index, *chr);
-            *index += 1;
+            string.insert(string.len() - *index, *chr);
+            //*index += 1;
         },
         Left => {
-            if *index > 0 {
-                *index -= 1;
-            }
-        },
-        Right => {
             if *index < string.len() {
                 *index += 1;
             }
         },
-        Backspace => {
+        Right => {
             if *index > 0 {
-                string.remove(*index - 1);
                 *index -= 1;
             }
         },
-        Delete => {
+        Backspace => {
             if string.len() != 0 && *index < string.len() {
-                string.remove(*index);
+                string.remove(string.len() - *index - 1);
+                //*index -= 1;
+            }
+        },
+        Delete => {
+            if string.len() != 0 && *index > 0 {
+                string.remove(string.len() - *index);
+                *index -= 1;
             }
         },
         Enter => {
@@ -57,7 +58,7 @@ pub fn input_key(ev: &Event) -> KeyCode {
     }
 }
 
-pub fn print_at(x: u16, y: u16, string: &String, cursor: Option<usize>) {
+pub fn print_typing(x: u16, y: u16, string: &String, cursor: Option<usize>) {
     let mut stdout = stdout();
     queue!(stdout,
            cursor::MoveTo(x, y),
@@ -65,10 +66,8 @@ pub fn print_at(x: u16, y: u16, string: &String, cursor: Option<usize>) {
 
     if let Some(pos) = cursor {
         queue!(stdout,
-               cursor::MoveTo(x + pos as u16, y));
+               cursor::MoveTo(x + (string.len() - pos) as u16, y));
     }
-
-    stdout.flush();
 }
 
 pub fn center_offset(center: u16, offset: i16) -> u16 {
