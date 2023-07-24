@@ -1,5 +1,5 @@
 use orion::{aead::{self, SecretKey}, errors::UnknownCryptoError as CryptoError};
-use std::{io::{self, Write}, fs, env, time};
+use std::{io::{self, Write}, fs, env, time, ops::Range};
 use serde::{Serialize, Deserialize};
 use crossterm::{queue, execute, cursor, style, terminal, event};
 
@@ -22,32 +22,35 @@ enum Tab {
     Totp,
 }
 
+enum EditMenuValue<'a> {
+    String(&'static str, &'a mut String),
+    Int(&'static str, &'a mut usize, Range<usize>),
+}
 
 fn main() {
     let mut stdout = io::stdout();
-    execute!(stdout,
-             terminal::EnterAlternateScreen,
-             terminal::DisableLineWrap);
-    terminal::enable_raw_mode();
 
     'main: {
         let filename: String = {
-            let mut filename: Option<String> = None;
-
             if let Some(dir_arg) = env::args().collect::<Vec<String>>().get(1) {
-                filename = Some(dir_arg.to_string());
+                dir_arg.to_string()
 
             } else if let Ok(dir_env) = env::var("PASSRS_DIR") {
-                filename = Some(dir_env.to_string());
+                dir_env.to_string()
 
             } else if let Ok(dir_home) = env::var("HOME") {
-                filename = Some(format!("{}/.passrs", dir_home));
-            }
+                format!("{}/.local/share/passrs", dir_home)
 
-            filename.unwrap()
+            } else {
+                panic!("Expected file directory as argument, environment variable, or a home directory environment variable");
+            }
         };
         //dbg!(&filename);
 
+        execute!(stdout,
+                 terminal::EnterAlternateScreen,
+                 terminal::DisableLineWrap);
+        terminal::enable_raw_mode();
 
         let master_pk: Option<SecretKey> = {
             if let Ok(_) = env::var("PASSRS_NOPASS") {
@@ -58,26 +61,15 @@ fn main() {
                 Some(key)
 
             } else {
-                /*
-                let mut pass_stdin = String::new();
-                if let Ok(_) = io::stdin().read_line(&mut pass_stdin) {
-                */
-                /*
-                if let Ok(mut pass_stdin) = Password::new("Master password:").without_confirmation().prompt() {
-                    Some(pass_stdin)
-                }
-                */
-                //let pass = ui::input_password();
-
                 let mut pass = String::new();
 
                 let pass = loop {
                     let size = terminal::size().unwrap();
                     queue!(stdout,
                            terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, -4), ui::center_offset(size.1, -1)),
+                           cursor::MoveTo(ui::center_offset(size.0, 8), ui::center_offset(size.1, 1)),
                            style::Print(format!("Password:")),
-                           cursor::MoveTo(ui::center_offset(size.0, -(pass.len() as i16) / 2), ui::center_offset(size.1, 0)));
+                           cursor::MoveTo(ui::center_offset(size.0, pass.len() as u16), ui::center_offset(size.1, 0)));
                     for _ in 0..pass.len() {
                         queue!(stdout,
                                style::Print("*"));
@@ -99,7 +91,6 @@ fn main() {
                 }
             }
         };
-        //dbg!(&master_pk);
 
         let mut password_set: Passwords = {
             if let Ok(bytes) = fs::read(&filename) {
@@ -131,19 +122,14 @@ fn main() {
                 Passwords { pass: Vec::new(), totp: Vec::new() }
             }
         };
-        //dbg!(password_set);
-
-        for x in 0..100 {
-            password_set.totp.push(totp::TotpCode::new());
-        }
 
         main_ui(&mut password_set);
     }
 
     terminal::disable_raw_mode();
     execute!(stdout,
-             terminal::EnableLineWrap,
-             terminal::LeaveAlternateScreen);
+             terminal::LeaveAlternateScreen,
+             terminal::EnableLineWrap);
     stdout.flush();
 }
 
@@ -170,13 +156,47 @@ fn main_ui(password_set: &mut Passwords) {
                 Tab::Password => {
                     queue!(stdout,
                            terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, -5), 0),
+                           cursor::MoveTo(ui::center_offset(size.0, 10), 0),
                            style::Print("Passwords"));
+
+                    for (index, y_pos) in view.zip(1..size.1) {
+                        let this_pass = &password_set.pass[index];
+
+                        let pass_string =
+                            if show_all || index == *list_scroll {
+                                format!(" {name:width$} {pass} ",
+                                        name = this_pass.name,
+                                        pass = this_pass.password,
+                                        width = size.0 as usize - 3 - this_pass.password.len())
+                            } else {
+                                format!(" {name:width$}",
+                                        name = this_pass.name,
+                                        width = size.0 as usize - 1)
+                            };
+
+                        if this_pass.delete {
+                            queue!(stdout, style::Print(style::Attribute::CrossedOut));
+                        }
+
+                        if index == *list_scroll {
+                            queue!(stdout,
+                                   cursor::MoveTo(0, y_pos),
+                                   style::SetForegroundColor(THEME_COLOUR),
+                                   style::Print(pass_string));
+
+                        } else {
+                            queue!(stdout,
+                                   cursor::MoveTo(0, y_pos),
+                                   style::Print(pass_string));
+                        }
+
+                        queue!(stdout, style::Print(style::Attribute::Reset));
+                    }
                 },
                 Tab::Totp => {
                     queue!(stdout,
                            terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, -7), 0),
+                           cursor::MoveTo(ui::center_offset(size.0, 14), 0),
                            style::Print("Authenticator"));
 
                     let time = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
@@ -194,7 +214,6 @@ fn main_ui(password_set: &mut Passwords) {
 
                     for (index, y_pos) in view.zip(1..size.1) {
                         let this_totp = &password_set.totp[index];
-                        let main_width = size.0 as usize - 4 - this_totp.digits;
 
                         let totp_string =
                             if show_all || index == *list_scroll {
@@ -203,10 +222,16 @@ fn main_ui(password_set: &mut Passwords) {
                                         name = this_totp.name,
                                         code1 = this_totp_code[..this_totp.digits / 2].to_string(),
                                         code2 = this_totp_code[this_totp.digits / 2..].to_string(),
-                                        width = main_width)
+                                        width = size.0 as usize - 4 - this_totp.digits)
                             } else {
-                                format!(" {}", this_totp.name)
+                                format!(" {name:width$}",
+                                        name = this_totp.name,
+                                        width = size.0 as usize - 1)
                             };
+
+                        if this_totp.delete {
+                            queue!(stdout, style::Print(style::Attribute::CrossedOut));
+                        }
 
                         if index == *list_scroll {
                             let string_split = (totp_string.len() as f32 * ((time.as_millis() % 30000) as f32 / 30000.0)) as usize + if totp_next { 0 } else { 1 };
@@ -219,14 +244,15 @@ fn main_ui(password_set: &mut Passwords) {
                                    style::Print(string_parts.0),
                                    style::SetForegroundColor(colours.0),
                                    style::SetBackgroundColor(colours.1),
-                                   style::Print(string_parts.1),
-                                   style::ResetColor);
+                                   style::Print(string_parts.1));
 
                         } else {
                             queue!(stdout,
                                    cursor::MoveTo(0, y_pos),
                                    style::Print(totp_string));
                         }
+
+                        queue!(stdout, style::Print(style::Attribute::Reset));
                     }
                 },
             }
@@ -265,26 +291,82 @@ fn main_ui(password_set: &mut Passwords) {
                         Tab::Totp => shift_item::<totp::TotpCode>(&mut password_set.totp, &mut totp_scroll, false),
                     }
                 },
+                KeyCode::Char('g') => {
+                    *list_scroll = 0;
+                },
+                KeyCode::Char('G') => {
+                    *list_scroll = list_length - 1;
+                },
                 KeyCode::Char('v') => {
                     show_all = !show_all;
                 },
                 KeyCode::Char('n') => {
                     totp_next = !totp_next;
                 },
+                KeyCode::Char('d') => {
+                    match tab {
+                        Tab::Password => {
+                            password_set.pass[pass_scroll].delete = !password_set.pass[pass_scroll].delete;
+                        },
+                        Tab::Totp => {
+                            password_set.totp[totp_scroll].delete = !password_set.totp[totp_scroll].delete;
+                        },
+                    }
+                },
                 KeyCode::Char('e') => {
                     match tab {
                         Tab::Password => {
                             if password_set.pass.len() != 0 {
-                                if let Some(p) = pass_edit_ui(Some(&password_set.pass[pass_scroll])) {
-                                    password_set.pass[pass_scroll] = p;
+                                let this_pass: &mut pass::Password = &mut password_set.pass[pass_scroll];
+                                let mut temp_pass: pass::Password = this_pass.clone();
+
+                                if edit_values_ui("Edit Password", &mut [
+                                    EditMenuValue::String("Name", &mut temp_pass.name),
+                                    EditMenuValue::String("Password", &mut temp_pass.password),
+                                ]) {
+                                    *this_pass = temp_pass;
                                 }
                             }
                         },
                         Tab::Totp => {
                             if password_set.totp.len() != 0 {
-                                if let Some(p) = totp_edit_ui(Some(&password_set.totp[totp_scroll])) {
-                                    password_set.totp[totp_scroll] = p;
+                                let this_totp: &mut totp::TotpCode = &mut password_set.totp[totp_scroll];
+                                let mut temp_totp: totp::TotpCode = this_totp.clone();
+
+                                if edit_values_ui("Edit TOTP", &mut [
+                                    EditMenuValue::String("Name", &mut temp_totp.name),
+                                    EditMenuValue::Int("Digits", &mut temp_totp.digits, 4..8),
+                                    EditMenuValue::String("Secret", &mut temp_totp.secret),
+                                ]) {
+                                    *this_totp = temp_totp;
+                                    this_totp.recalculate_code();
                                 }
+                            }
+                        },
+                    }
+                },
+                KeyCode::Char('o') => {
+                    match tab {
+                        Tab::Password => {
+                            let mut temp_pass = pass::Password::new();
+
+                            if edit_values_ui("Edit Password", &mut [
+                                EditMenuValue::String("Name", &mut temp_pass.name),
+                                EditMenuValue::String("Password", &mut temp_pass.password),
+                            ]) {
+                                password_set.pass.insert(pass_scroll, temp_pass);
+                            }
+                        },
+                        Tab::Totp => {
+                            let mut temp_totp = totp::TotpCode::new();
+
+                            if edit_values_ui("Edit TOTP", &mut [
+                                EditMenuValue::String("Name", &mut temp_totp.name),
+                                EditMenuValue::Int("Digits", &mut temp_totp.digits, 4..8),
+                                EditMenuValue::String("Secret", &mut temp_totp.secret),
+                            ]) {
+                                temp_totp.recalculate_code();
+                                password_set.totp.insert(totp_scroll, temp_totp);
                             }
                         },
                     }
@@ -295,107 +377,46 @@ fn main_ui(password_set: &mut Passwords) {
     }
 }
 
-fn pass_edit_ui(pass: Option<&pass::Password>) -> Option<pass::Password> {
-    use event::{Event, KeyCode};
-
-    let mut stdout = io::stdout();
-    let mut selected: u8 = 0;
-    let mut string_index: usize = 0;
-    let mut new_pass: pass::Password = {
-        if let Some(p) = pass {
-            p.clone()
-        } else {
-            pass::Password::new()
-        }
-    };
-
-    loop {
-        let size = terminal::size().unwrap();
-
-        queue!(stdout,
-               terminal::Clear(terminal::ClearType::All),
-               cursor::MoveTo(ui::center_offset(size.0, -7), 0),
-               style::Print("Edit Password"),
-               cursor::MoveTo(1, 2),
-               style::Print("Name:"),
-               cursor::MoveTo(1, 3),
-               style::Print(&new_pass.name));
-
-        stdout.flush();
-
-        if let Ok(true) = event::poll(POLL_TIME) {
-            let ev = event::read().unwrap();
-            let keyev = ui::input_key(&ev);
-
-            match keyev {
-                KeyCode::Esc => {
-                    return None;
-                },
-                KeyCode::Enter => {
-                    return Some(new_pass);
-                },
-                KeyCode::Tab => {
-                    selected = (selected + 1) % 2;
-                },
-                _ => {
-                    match selected {
-                        0 => {
-                            ui::input_string(&mut new_pass.name, &mut string_index, &keyev);
-                        },
-                        1 => {
-                        },
-                        _ => panic!("How did we get here?"),
-                    }
-                }
-            }
-        }
-    }
+fn master_pass_ui() -> String {
 }
 
-fn totp_edit_ui(totp: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
+fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
     use event::{Event, KeyCode};
 
     let mut stdout = io::stdout();
-    let mut selected: u8 = 0;
+    let mut selected: usize = 0;
     let mut string_index: usize = 0;
-    let mut new_totp: totp::TotpCode = {
-        if let Some(t) = totp {
-            t.clone()
-        } else {
-            totp::TotpCode::new()
-        }
-    };
 
     loop {
         let size = terminal::size().unwrap();
 
         queue!(stdout,
                terminal::Clear(terminal::ClearType::All),
-               cursor::MoveTo(ui::center_offset(size.0, -7), 0),
-               style::Print("Edit TOTP Code"));
+               cursor::MoveTo(ui::center_offset(size.0, title.len() as u16), 0),
+               style::Print(title));
 
-        match selected {
-            0 => {
-                queue!(stdout,
-                       cursor::MoveTo(1, 2),
-                       style::Print("Name:"));
-                ui::print_typing(1, 3, &new_totp.name, Some(string_index));
-            },
-            1 => {
-                queue!(stdout,
-                       cursor::MoveTo(1, 2),
-                       style::Print("Digits:"),
-                       cursor::MoveTo(1, 3),
-                       style::Print(&new_totp.digits));
-            },
-            2 => {
-                queue!(stdout,
-                       cursor::MoveTo(1, 2),
-                       style::Print("Secret:"),
-                       cursor::MoveTo(1, 3),
-                       style::Print(&new_totp.secret));
-            },
-            _ => panic!("How did we get here?"),
+        for value_index in 0..values.len() {
+            if selected == value_index {
+                queue!(stdout, style::SetForegroundColor(THEME_COLOUR));
+            }
+
+            queue!(stdout,
+                   cursor::MoveTo(1, 2 + value_index as u16 * 3));
+            match &values[value_index] {
+                EditMenuValue::String(label, string_value) => {
+                    queue!(stdout, style::Print(label));
+                    ui::print_typing(5, 3 + value_index as u16 * 3, string_value,
+                                     if selected == value_index { Some(string_index) } else { None });
+                },
+                EditMenuValue::Int(label, int_value, _) => {
+                    queue!(stdout,
+                           style::Print(label),
+                           cursor::MoveTo(5, 3 + value_index as u16 * 3),
+                           style::Print(int_value));
+                },
+            }
+
+            queue!(stdout, style::ResetColor);
         }
 
         stdout.flush();
@@ -406,37 +427,43 @@ fn totp_edit_ui(totp: Option<&totp::TotpCode>) -> Option<totp::TotpCode> {
 
             match keyev {
                 KeyCode::Esc => {
-                    return None;
+                    return false;
                 },
                 KeyCode::Enter => {
-                    return Some(new_totp);
+                    return true;
                 },
-                KeyCode::Tab => {
-                    selected = (selected + 1) % 3;
+                KeyCode::Up => {
+                    if selected == 0 {
+                        selected = values.len() - 1;
+                    } else {
+                        selected = selected - 1;
+                    }
+                    string_index = 0;
+                },
+                KeyCode::Down => {
+                    selected = (selected + 1) % values.len();
+                    string_index = 0;
                 },
                 _ => {
-                    match selected {
-                        0 => {
-                            ui::input_string(&mut new_totp.name, &mut string_index, &keyev);
+                    match &mut values[selected] {
+                        EditMenuValue::String(_, string_val) => {
+                            ui::input_string(*string_val, &mut string_index, &keyev);
                         },
-                        1 => {
+                        EditMenuValue::Int(_, int_val, range) => {
                             match keyev {
                                 KeyCode::Left => {
-                                    if new_totp.digits > 4 {
-                                        new_totp.digits -= 1;
+                                    if **int_val > range.start {
+                                        **int_val -= 1;
                                     }
                                 },
                                 KeyCode::Right => {
-                                    if new_totp.digits < 8 {
-                                        new_totp.digits += 1;
+                                    if **int_val < range.end {
+                                        **int_val += 1;
                                     }
                                 },
                                 _ => {},
                             }
                         },
-                        2 => {
-                        },
-                        _ => panic!("How did we get here?"),
                     }
                 }
             }

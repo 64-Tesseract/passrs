@@ -224,7 +224,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "passwords"
+name = "passrs"
 version = "0.1.0"
 dependencies = [
  "crossterm",
