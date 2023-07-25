@@ -8,17 +8,6 @@ mod totp;
 mod pass;
 mod ui;
 
-#[macro_export]
-macro_rules! safe_sub {
-    ($t:ty; $a:expr, $b:expr) => {{
-        if $b >= $a {
-            <$t>::default()
-        } else {
-            $a as $t - $b as $t
-        }
-    }}
-}
-
 const THEME_COLOUR: style::Color = style::Color::Red;
 const POLL_TIME: time::Duration = time::Duration::from_millis(100);
 
@@ -43,6 +32,17 @@ enum MasterPassResult {
     Password(String),
     NoPassword,
     Cancel,
+}
+
+#[macro_export]
+macro_rules! safe_sub {
+    ($t:ty; $a:expr, $b:expr) => {{
+        if $b >= $a {
+            <$t>::default()
+        } else {
+            $a as $t - $b as $t
+        }
+    }}
 }
 
 fn main() {
@@ -319,10 +319,10 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                         Tab::Totp => shift_item::<totp::TotpCode>(&mut password_set.totp, &mut totp_scroll, false),
                     }
                 },
-                KeyCode::Char('g') => {
+                KeyCode::Home | KeyCode::Char('g') => {
                     *list_scroll = 0;
                 },
-                KeyCode::Char('G') => {
+                KeyCode::End | KeyCode::Char('G') => {
                     *list_scroll = list_length - 1;
                 },
                 KeyCode::Char('p') => {
@@ -517,7 +517,7 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
             match &values[value_index] {
                 EditMenuValue::String(label, string_value) => {
                     queue!(stdout, style::Print(label));
-                    ui::print_typing(5, 3 + value_index as u16 * 3, string_value,
+                    ui::print_typing(5..size.0, 3 + value_index as u16 * 3, string_value,
                                      if selected == value_index { Some(string_index) } else { None });
                 },
                 EditMenuValue::Int(label, int_value, _) => {
