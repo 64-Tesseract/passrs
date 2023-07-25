@@ -1,11 +1,23 @@
 use orion::{aead::{self, SecretKey}, errors::UnknownCryptoError as CryptoError};
 use std::{io::{self, Write}, fs, env, time, ops::Range};
 use serde::{Serialize, Deserialize};
+use clipboard::{ClipboardProvider, ClipboardContext};
 use crossterm::{queue, execute, cursor, style, terminal, event};
 
 mod totp;
 mod pass;
 mod ui;
+
+#[macro_export]
+macro_rules! safe_sub {
+    ($t:ty; $a:expr, $b:expr) => {{
+        if $b >= $a {
+            <$t>::default()
+        } else {
+            $a as $t - $b as $t
+        }
+    }}
+}
 
 const THEME_COLOUR: style::Color = style::Color::Red;
 const POLL_TIME: time::Duration = time::Duration::from_millis(100);
@@ -27,8 +39,21 @@ enum EditMenuValue<'a> {
     Int(&'static str, &'a mut usize, Range<usize>),
 }
 
+enum MasterPassResult {
+    Password(String),
+    NoPassword,
+    Cancel,
+}
+
 fn main() {
     let mut stdout = io::stdout();
+    let mut error = String::new();
+
+    execute!(stdout,
+             terminal::EnterAlternateScreen,
+             terminal::DisableLineWrap,
+             cursor::Hide);
+    terminal::enable_raw_mode();
 
     'main: {
         let filename: String = {
@@ -42,17 +67,12 @@ fn main() {
                 format!("{}/.local/share/passrs", dir_home)
 
             } else {
-                panic!("Expected file directory as argument, environment variable, or a home directory environment variable");
+                error = "Expected file directory as argument, environment variable, or a home directory environment variable".to_string();
+                break 'main;
             }
         };
-        //dbg!(&filename);
 
-        execute!(stdout,
-                 terminal::EnterAlternateScreen,
-                 terminal::DisableLineWrap);
-        terminal::enable_raw_mode();
-
-        let master_pk: Option<SecretKey> = {
+        let mut master_pk: Option<SecretKey> = {
             if let Ok(_) = env::var("PASSRS_NOPASS") {
                 None
 
@@ -61,33 +81,10 @@ fn main() {
                 Some(key)
 
             } else {
-                let mut pass = String::new();
-
-                let pass = loop {
-                    let size = terminal::size().unwrap();
-                    queue!(stdout,
-                           terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, 8), ui::center_offset(size.1, 1)),
-                           style::Print(format!("Password:")),
-                           cursor::MoveTo(ui::center_offset(size.0, pass.len() as u16), ui::center_offset(size.1, 0)));
-                    for _ in 0..pass.len() {
-                        queue!(stdout,
-                               style::Print("*"));
-                    }
-                    stdout.flush();
-
-                    let mut index = pass.len();
-                    let ev = event::read().unwrap();
-                    if ui::input_string(&mut pass, &mut index, &ui::input_key(&ev)) == ui::AfterAction::Enter {
-                        break pass;
-                    }
-                };
-
-                if !pass.is_empty() {
-                    let key = generate_orion_key(&pass).unwrap();
-                    Some(key)
-                } else {
-                    None
+                match master_pass_ui() {
+                    MasterPassResult::Password(pass) => Some(generate_orion_key(&pass).unwrap()),
+                    MasterPassResult::NoPassword => None,
+                    MasterPassResult::Cancel => { break 'main; },
                 }
             }
         };
@@ -95,12 +92,12 @@ fn main() {
         let mut password_set: Passwords = {
             if let Ok(bytes) = fs::read(&filename) {
                 let json = {
-                    if let Some(master_key) = master_pk {
-                        if let Ok(json) = aead::open(&master_key, &bytes) {
+                    if let Some(ref master_key) = master_pk {
+                        if let Ok(json) = aead::open(master_key, &bytes) {
                             json
 
                         } else {
-                            eprintln!("Cannot decrypt data with provided password");
+                            error = "Cannot decrypt data with provided password".to_string();
                             break 'main;
                         }
 
@@ -113,28 +110,55 @@ fn main() {
                     passwords
 
                 } else {
-                    eprintln!("Cannot parse decrypted JSON:\n{}", std::str::from_utf8(&json).unwrap());
+                    error = format!("Cannot parse raw JSON, you might require a password:\n{}", String::from_utf8_lossy(&json));
                     break 'main;
                 }
 
             } else {
-                eprintln!("Cannot read file, making new password set");
+                error = "Cannot read file, making new password set".to_string();
                 Passwords { pass: Vec::new(), totp: Vec::new() }
             }
         };
 
-        main_ui(&mut password_set);
+        main_ui(&mut password_set, &mut master_pk);
+
+        password_set.pass.retain(|p| !p.delete);
+        password_set.totp.retain(|t| !t.delete);
+
+        let bytes = {
+            let json = serde_json::to_string(&password_set).unwrap();
+
+            if let Some(ref master_key) = master_pk {
+                if let Ok(bytes) = aead::seal(master_key, &json.clone().into_bytes()) {
+                    bytes
+                } else {
+                    error = format!("Could not encrypt JSON:\n{}", &json);
+                    break 'main;
+                }
+            } else {
+                json.into_bytes()
+            }
+        };
+
+        if fs::write(&filename, bytes).is_err() {
+            error = "Could not save file".to_string();
+            break 'main;
+        }
     }
 
     terminal::disable_raw_mode();
     execute!(stdout,
              terminal::LeaveAlternateScreen,
-             terminal::EnableLineWrap);
+             terminal::EnableLineWrap,
+             cursor::Show);
     stdout.flush();
+
+    eprintln!("{}", error);
 }
 
-fn main_ui(password_set: &mut Passwords) {
+fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
     use event::{Event, KeyCode};
+    let mut clip: ClipboardContext = ClipboardProvider::new().unwrap();
 
     let mut stdout = io::stdout();
     let mut tab = Tab::Password;
@@ -150,13 +174,13 @@ fn main_ui(password_set: &mut Passwords) {
         let list_length = match tab { Tab::Password => password_set.pass.len(), Tab::Totp => password_set.totp.len() };
 
         if size.0 > 1 && size.1 > 1 {
-            let view = ui::visible_scrolled(size.1 - 1, list_length, *list_scroll);
+            let view = ui::visible_scrolled(safe_sub!(u16; size.1, 1), list_length, *list_scroll);
 
             match tab {
                 Tab::Password => {
                     queue!(stdout,
                            terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, 10), 0),
+                           cursor::MoveTo(ui::center_offset(size.0, 9), 0),
                            style::Print("Passwords"));
 
                     for (index, y_pos) in view.zip(1..size.1) {
@@ -167,11 +191,11 @@ fn main_ui(password_set: &mut Passwords) {
                                 format!(" {name:width$} {pass} ",
                                         name = this_pass.name,
                                         pass = this_pass.password,
-                                        width = size.0 as usize - 3 - this_pass.password.len())
+                                        width = safe_sub!(usize; safe_sub!(usize; size.0, 3), this_pass.password.char_indices().count()))
                             } else {
                                 format!(" {name:width$}",
                                         name = this_pass.name,
-                                        width = size.0 as usize - 1)
+                                        width = safe_sub!(usize; size.0, 1))
                             };
 
                         if this_pass.delete {
@@ -190,13 +214,15 @@ fn main_ui(password_set: &mut Passwords) {
                                    style::Print(pass_string));
                         }
 
-                        queue!(stdout, style::Print(style::Attribute::Reset));
+                        queue!(stdout,
+                               style::ResetColor,
+                               style::Print(style::Attribute::NotCrossedOut));
                     }
                 },
                 Tab::Totp => {
                     queue!(stdout,
                            terminal::Clear(terminal::ClearType::All),
-                           cursor::MoveTo(ui::center_offset(size.0, 14), 0),
+                           cursor::MoveTo(ui::center_offset(size.0, 13), 0),
                            style::Print("Authenticator"));
 
                     let time = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap();
@@ -206,7 +232,7 @@ fn main_ui(password_set: &mut Passwords) {
                         if totp_last_time != totp_now_time {
                             totp_next = false;
                             for totp_code in &mut password_set.totp {
-                                totp_code.calculate_codes(totp_now_time);
+                                totp_code.calculate_codes();
                             }
                             totp_last_time = totp_now_time;
                         }
@@ -220,13 +246,13 @@ fn main_ui(password_set: &mut Passwords) {
                                 let this_totp_code = this_totp.get_code(totp_next);
                                 format!(" {name:width$} {code1} {code2} ",
                                         name = this_totp.name,
-                                        code1 = this_totp_code[..this_totp.digits / 2].to_string(),
-                                        code2 = this_totp_code[this_totp.digits / 2..].to_string(),
-                                        width = size.0 as usize - 4 - this_totp.digits)
+                                        code1 = this_totp_code[..this_totp.data.digits / 2].to_string(),
+                                        code2 = this_totp_code[this_totp.data.digits / 2..].to_string(),
+                                        width = safe_sub!(usize; safe_sub!(usize; size.0, 4), this_totp.data.digits))
                             } else {
                                 format!(" {name:width$}",
                                         name = this_totp.name,
-                                        width = size.0 as usize - 1)
+                                        width = safe_sub!(usize; size.0, 1))
                             };
 
                         if this_totp.delete {
@@ -252,7 +278,9 @@ fn main_ui(password_set: &mut Passwords) {
                                    style::Print(totp_string));
                         }
 
-                        queue!(stdout, style::Print(style::Attribute::Reset));
+                        queue!(stdout,
+                               style::ResetColor,
+                               style::Print(style::Attribute::NotCrossedOut));
                     }
                 },
             }
@@ -297,11 +325,28 @@ fn main_ui(password_set: &mut Passwords) {
                 KeyCode::Char('G') => {
                     *list_scroll = list_length - 1;
                 },
+                KeyCode::Char('p') => {
+                    match master_pass_ui() {
+                        MasterPassResult::Password(pass) => { *master_pk = Some(generate_orion_key(&pass).unwrap()); },
+                        MasterPassResult::NoPassword => { *master_pk = None; },
+                        MasterPassResult::Cancel => {},
+                    }
+                },
                 KeyCode::Char('v') => {
                     show_all = !show_all;
                 },
                 KeyCode::Char('n') => {
                     totp_next = !totp_next;
+                },
+                KeyCode::Char('y') => {
+                    match tab {
+                        Tab::Password => {
+                            clip.set_contents(password_set.pass[pass_scroll].password.clone());
+                        },
+                        Tab::Totp => {
+                            clip.set_contents(password_set.totp[totp_scroll].get_code(totp_next).to_string());
+                        },
+                    }
                 },
                 KeyCode::Char('d') => {
                     match tab {
@@ -332,14 +377,16 @@ fn main_ui(password_set: &mut Passwords) {
                             if password_set.totp.len() != 0 {
                                 let this_totp: &mut totp::TotpCode = &mut password_set.totp[totp_scroll];
                                 let mut temp_totp: totp::TotpCode = this_totp.clone();
+                                let mut temp_secret = temp_totp.get_secret_string();
 
                                 if edit_values_ui("Edit TOTP", &mut [
                                     EditMenuValue::String("Name", &mut temp_totp.name),
-                                    EditMenuValue::Int("Digits", &mut temp_totp.digits, 4..8),
-                                    EditMenuValue::String("Secret", &mut temp_totp.secret),
+                                    EditMenuValue::Int("Digits", &mut temp_totp.data.digits, 4..8),
+                                    EditMenuValue::String("Secret", &mut temp_secret),
                                 ]) {
+                                    temp_totp.set_secret_string(temp_secret);
+                                    temp_totp.calculate_codes();
                                     *this_totp = temp_totp;
-                                    this_totp.recalculate_code();
                                 }
                             }
                         },
@@ -354,19 +401,37 @@ fn main_ui(password_set: &mut Passwords) {
                                 EditMenuValue::String("Name", &mut temp_pass.name),
                                 EditMenuValue::String("Password", &mut temp_pass.password),
                             ]) {
-                                password_set.pass.insert(pass_scroll, temp_pass);
+                                if pass_scroll + 1 >= password_set.pass.len() {
+                                    password_set.pass.push(temp_pass);
+                                } else {
+                                    password_set.pass.insert(pass_scroll + 1, temp_pass);
+                                }
+
+                                if password_set.pass.len() != 1 {
+                                    pass_scroll += 1;
+                                }
                             }
                         },
                         Tab::Totp => {
                             let mut temp_totp = totp::TotpCode::new();
+                            let mut temp_secret = temp_totp.get_secret_string();
 
                             if edit_values_ui("Edit TOTP", &mut [
                                 EditMenuValue::String("Name", &mut temp_totp.name),
-                                EditMenuValue::Int("Digits", &mut temp_totp.digits, 4..8),
-                                EditMenuValue::String("Secret", &mut temp_totp.secret),
+                                EditMenuValue::Int("Digits", &mut temp_totp.data.digits, 4..8),
+                                EditMenuValue::String("Secret", &mut temp_secret),
                             ]) {
-                                temp_totp.recalculate_code();
-                                password_set.totp.insert(totp_scroll, temp_totp);
+                                temp_totp.set_secret_string(temp_secret);
+                                temp_totp.calculate_codes();
+                                if totp_scroll + 1 >= password_set.totp.len() {
+                                    password_set.totp.push(temp_totp);
+                                } else {
+                                    password_set.totp.insert(totp_scroll + 1, temp_totp);
+                                }
+
+                                if password_set.totp.len() != 1 {
+                                    totp_scroll += 1;
+                                }
                             }
                         },
                     }
@@ -377,7 +442,47 @@ fn main_ui(password_set: &mut Passwords) {
     }
 }
 
-fn master_pass_ui() -> String {
+fn master_pass_ui() -> MasterPassResult {
+    let mut stdout = io::stdout();
+    let mut pass = String::new();
+
+    loop {
+        let size = terminal::size().unwrap();
+        queue!(stdout,
+               terminal::Clear(terminal::ClearType::All),
+               cursor::MoveTo(ui::center_offset(size.0, 9), ui::center_offset(size.1, 0) - 1),
+               style::Print(format!("Password:")),
+               cursor::MoveTo(ui::center_offset(size.0, pass.len() as u16), ui::center_offset(size.1, 0)));
+
+        for _ in 0..pass.len() {
+            queue!(stdout, style::Print("*"));
+        }
+
+        stdout.flush();
+
+        let ev = event::read().unwrap();
+        let ev_key = &ui::input_key(&ev);
+        if pass.len() >= 32 {
+            if let event::KeyCode::Char(_) = ev_key {
+                continue;
+            }
+        }
+
+        let mut index = pass.char_indices().count();
+        match ui::input_string(&mut pass, &mut index, ev_key) {
+            ui::AfterAction::Enter => {
+                if pass.len() == 0 {
+                    break MasterPassResult::NoPassword;
+                } else {
+                    break MasterPassResult::Password(format!("{:32}", pass));
+                }
+            },
+            ui::AfterAction::Cancel => {
+                break MasterPassResult::Cancel;
+            },
+            _ => {},
+        }
+    }
 }
 
 fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
@@ -385,7 +490,14 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
 
     let mut stdout = io::stdout();
     let mut selected: usize = 0;
-    let mut string_index: usize = 0;
+    let mut string_index: usize = {
+        if let EditMenuValue::String(_, string_val) = &values[selected] {
+            string_val.char_indices().count()
+        } else {
+            0
+        }
+    }
+;
 
     loop {
         let size = terminal::size().unwrap();
@@ -438,11 +550,15 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
                     } else {
                         selected = selected - 1;
                     }
-                    string_index = 0;
+                    if let EditMenuValue::String(_, string_val) = &values[selected] {
+                        string_index = string_val.char_indices().count();
+                    }
                 },
                 KeyCode::Down => {
                     selected = (selected + 1) % values.len();
-                    string_index = 0;
+                    if let EditMenuValue::String(_, string_val) = &values[selected] {
+                        string_index = string_val.char_indices().count();
+                    }
                 },
                 _ => {
                     match &mut values[selected] {
