@@ -1,5 +1,5 @@
 use orion::{aead::{self, SecretKey}, errors::UnknownCryptoError as CryptoError};
-use std::{io::{self, Write}, fs, env, time, ops::Range};
+use std::{io::{self, Write}, fs, env, time, cmp::min, ops::Range};
 use serde::{Serialize, Deserialize};
 use clipboard::{ClipboardProvider, ClipboardContext};
 use crossterm::{queue, execute, cursor, style, terminal, event};
@@ -8,14 +8,25 @@ mod totp;
 mod pass;
 mod ui;
 
-const THEME_COLOUR: style::Color = style::Color::Red;
 const POLL_TIME: time::Duration = time::Duration::from_millis(100);
 const DEFAULT_TAB: Tab = Tab::Totp;
+const COLOURS: [style::Color; 15] = [
+    style::Color::Red, style::Color::DarkRed,
+    style::Color::Green, style::Color::DarkGreen,
+    style::Color::Yellow, style::Color::DarkYellow,
+    style::Color::Blue, style::Color::DarkBlue,
+    style::Color::Magenta, style::Color::DarkMagenta,
+    style::Color::Cyan, style::Color::DarkCyan,
+    style::Color::White, style::Color::Grey,
+    style::Color::DarkGrey, /* style::Color::Black, */  // Imagine needing legible text
+];
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Passwords {
     pass: Vec<pass::Password>,
     totp: Vec<totp::TotpCode>,
+    #[serde(default = "usize::default")]
+    ui_colour: usize,
 }
 
 #[derive(PartialEq)]
@@ -89,8 +100,8 @@ fn main() {
                 println!("passrs also reads the following environment variables:");
                 println!("    HOME            The default data file is `$HOME/.local/share/passrs`");
                 println!("    PASSRS_FILE     Set the file to read data from, overridden by `--file`, `-f`");
-                println!("    PASSRS_PASS     Specify a password for passrs to use, bypassing the GUI password dialog");
-                println!("    PASSRS_NOPASS   Specify that passrs shouldn't use encryption, bypassing the GUI password dialog");
+                println!("    PASSRS_PASS     Specify the password (or explicitly no password) for passrs to use,");
+                println!("                        bypassing the GUI password dialog");
                 return;
             },
             "--help-gui" | "-H" => {
@@ -104,9 +115,11 @@ fn main() {
                 println!("    d               Mark the selected item for deletion upon exiting");
                 println!("    v               Toggle viewing unselected items");
                 println!("    n               Toggle viewing next TOTP code");
+                println!("    y               Copy the selected item to X clipboard");
                 println!("    e               Edit the selected item");
                 println!("    o               Create a new item and edit it");
                 println!("    p               Change encryption password for the current data file");
+                println!("    c               Cycle through theme colours");
                 println!("    Esc/q           Exit and save, excluding items marked for deletion");
                 println!("");
                 println!("In the edit item view:");
@@ -131,43 +144,31 @@ fn main() {
     }
 
     'main: {
-        /*
-        let filename: String = {
-            if let Some(dir_arg) = env::args().collect::<Vec<String>>().get(1) {
-                dir_arg.to_string()
-
-            } else if let Ok(dir_env) = env::var("PASSRS_FILE") {
-                dir_env.to_string()
-
-            } else if let Ok(dir_home) = env::var("HOME") {
-                format!("{}/.local/share/passrs", dir_home)
-
-            } else {
-                error = "Expected file directory as argument, environment variable, or a home directory environment variable".to_string();
-                break 'main;
-            }
-        };
-        */
         let filename = filename.unwrap();
 
         let mut master_pk: Option<SecretKey> = {
-            if let Ok(_) = env::var("PASSRS_NOPASS") {
-                None
-
-            } else if let Ok(pass_env) = env::var("PASSRS_PASS") {
-                let key = generate_orion_key(&pass_env).unwrap();
-                Some(key)
+            if let Ok(pass_env) = env::var("PASSRS_PASS") {
+                if pass_env.len() == 0 {
+                    None
+                } else {
+                    let key = generate_orion_key(&pass_env).unwrap();
+                    Some(key)
+                }
 
             } else {
                 if script_print == None {
-                    match master_pass_ui() {
+                    enter_alt_screen(&mut stdout);
+                    let pk = match master_pass_ui() {
                         MasterPassResult::Password(pass) => Some(generate_orion_key(&pass).unwrap()),
                         MasterPassResult::NoPassword => None,
-                        MasterPassResult::Cancel => { break 'main; },
-                    }
+                        MasterPassResult::Cancel => { exit_alt_screen(&mut stdout); break 'main; },
+                    };
+                    exit_alt_screen(&mut stdout);
+
+                    pk
 
                 } else {
-                    eprintln!("Print mode requires a password to be specified with PASSRS_PASS or PASSRS_NOPASS");
+                    eprintln!("Print mode requires a password to be specified with PASSRS_PASS");
                     return;
                 }
             }
@@ -200,7 +201,7 @@ fn main() {
 
             } else {
                 eprintln!("Cannot read file, making new password set");
-                Passwords { pass: Vec::new(), totp: Vec::new() }
+                Passwords { pass: Vec::new(), totp: Vec::new(), ui_colour: 0 }
             }
         };
 
@@ -217,7 +218,9 @@ fn main() {
                 }
             },
             None => {
+                enter_alt_screen(&mut stdout);
                 main_ui(&mut password_set, &mut master_pk);
+                exit_alt_screen(&mut stdout);
 
                 password_set.pass.retain(|p| !p.delete);
                 password_set.totp.retain(|t| !t.delete);
@@ -248,8 +251,6 @@ fn main() {
 
 fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
     let mut stdout = io::stdout();
-
-    enter_alt_screen(&mut stdout);
 
     use event::{Event, KeyCode};
     let mut clip: ClipboardContext = ClipboardProvider::new().unwrap();
@@ -297,7 +298,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                         if index == *list_scroll {
                             queue!(stdout,
                                    cursor::MoveTo(0, y_pos),
-                                   style::SetForegroundColor(THEME_COLOUR),
+                                   style::SetForegroundColor(COLOURS[password_set.ui_colour]),
                                    style::Print(pass_string));
 
                         } else {
@@ -354,7 +355,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                         if index == *list_scroll {
                             let string_split = (totp_string.len() as f32 * ((time.as_millis() % 30000) as f32 / 30000.0)) as usize + if totp_next { 0 } else { 1 };
                             let string_parts = (&totp_string[..string_split].to_string(), &totp_string[string_split..].to_string());
-                            let colours = if totp_next { (style::Color::Black, THEME_COLOUR) } else { (THEME_COLOUR, style::Color::Black) };
+                            let colours = if totp_next { (style::Color::Black, COLOURS[password_set.ui_colour]) } else { (COLOURS[password_set.ui_colour], style::Color::Black) };
                             queue!(stdout,
                                    cursor::MoveTo(0, y_pos),
                                    style::SetForegroundColor(colours.1),
@@ -430,6 +431,9 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                 KeyCode::Char('n') => {
                     totp_next = !totp_next;
                 },
+                KeyCode::Char('c') => {
+                    password_set.ui_colour = (password_set.ui_colour + 1) % COLOURS.len();
+                },
                 KeyCode::Char('y') => {
                     match tab {
                         Tab::Password => {
@@ -460,7 +464,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                                 if edit_values_ui("Edit Password", &mut [
                                     EditMenuValue::String("Name", &mut temp_pass.name),
                                     EditMenuValue::String("Password", &mut temp_pass.password),
-                                ]) {
+                                ], COLOURS[password_set.ui_colour]) {
                                     *this_pass = temp_pass;
                                 }
                             }
@@ -475,7 +479,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                                     EditMenuValue::String("Name", &mut temp_totp.name),
                                     EditMenuValue::Int("Digits", &mut temp_totp.data.digits, 4..8),
                                     EditMenuValue::String("Secret", &mut temp_secret),
-                                ]) {
+                                ], COLOURS[password_set.ui_colour]) {
                                     temp_totp.set_secret_string(temp_secret);
                                     temp_totp.calculate_codes();
                                     *this_totp = temp_totp;
@@ -492,7 +496,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                             if edit_values_ui("Edit Password", &mut [
                                 EditMenuValue::String("Name", &mut temp_pass.name),
                                 EditMenuValue::String("Password", &mut temp_pass.password),
-                            ]) {
+                            ], COLOURS[password_set.ui_colour]) {
                                 if pass_scroll + 1 >= password_set.pass.len() {
                                     password_set.pass.push(temp_pass);
                                 } else {
@@ -512,7 +516,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                                 EditMenuValue::String("Name", &mut temp_totp.name),
                                 EditMenuValue::Int("Digits", &mut temp_totp.data.digits, 4..8),
                                 EditMenuValue::String("Secret", &mut temp_secret),
-                            ]) {
+                            ], COLOURS[password_set.ui_colour]) {
                                 temp_totp.set_secret_string(temp_secret);
                                 temp_totp.calculate_codes();
                                 if totp_scroll + 1 >= password_set.totp.len() {
@@ -532,14 +536,10 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
             }
         }
     }
-
-    exit_alt_screen(&mut stdout);
 }
 
 fn master_pass_ui() -> MasterPassResult {
     let mut stdout = io::stdout();
-
-    enter_alt_screen(&mut stdout);
 
     let mut pass = String::new();
 
@@ -548,7 +548,7 @@ fn master_pass_ui() -> MasterPassResult {
         queue!(stdout,
                terminal::Clear(terminal::ClearType::All),
                cursor::MoveTo(ui::center_offset(size.0, 9), ui::center_offset(size.1, 0) - 1),
-               style::Print(format!("Password:")),
+               style::Print("Password:"),
                cursor::MoveTo(ui::center_offset(size.0, pass.len() as u16), ui::center_offset(size.1, 0)));
 
         for _ in 0..pass.len() {
@@ -581,12 +581,10 @@ fn master_pass_ui() -> MasterPassResult {
         }
     };
 
-    exit_alt_screen(&mut stdout);
-
     return master_pass;
 }
 
-fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
+fn edit_values_ui(title: &str, values: &mut [EditMenuValue], ui_colour: style::Color) -> bool {
     use event::{Event, KeyCode};
 
     let mut stdout = io::stdout();
@@ -610,7 +608,7 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
 
         for value_index in 0..values.len() {
             if selected == value_index {
-                queue!(stdout, style::SetForegroundColor(THEME_COLOUR));
+                queue!(stdout, style::SetForegroundColor(ui_colour));
             }
 
             queue!(stdout,
@@ -725,7 +723,26 @@ fn exit_alt_screen(stdout: &mut io::Stdout) {
 
 #[inline]
 fn generate_orion_key(key: &str) -> Result<SecretKey, CryptoError> {
+    // Pad with spaces... cring
+    /*
     let padded = format!("{:32}", key);
-    let bytes = padded.as_bytes();
-    return SecretKey::from_slice(&bytes);
+    let padded_bytes = padded.as_bytes();
+    */
+
+    let mut padded_bytes = [0u8; 32];
+    let key_bytes = key.as_bytes();
+
+    // "Unstable", apparently - ok boomer
+    /*
+    for (pad, byte) in &mut padded.zip(key.as_bytes()) {
+        *pad = *byte;
+    }
+    */
+
+    // C gang lesgo
+    for i in 0..(min(key.len(), padded_bytes.len())) {
+        padded_bytes[i] = key_bytes[i];
+    }
+
+    return SecretKey::from_slice(&padded_bytes);
 }
