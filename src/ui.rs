@@ -1,6 +1,6 @@
-use std::io::{self, stdout, Write};
-use std::{cmp, ops::Range};
-use crossterm::{queue, cursor, event::{Event::{self, Key}, KeyCode::{self, *}, KeyModifiers}, style, terminal};
+use std::io::stdout;
+use std::{ops::Range};
+use crossterm::{queue, cursor, event::{Event::{self, Key}, KeyCode::{self, *}}, style};
 use super::safe_sub;
 
 
@@ -106,7 +106,7 @@ pub fn print_typing(mut x: Range<u16>, y: u16, string: &String, cursor: Option<u
 
     if let Some(pos) = cursor {
         queue!(stdout,
-               cursor::MoveTo(x.start + safe_sub!(usize; pos, scroll_start) as u16 * spacing, y),
+               cursor::MoveTo(x.start + safe_sub!(pos, scroll_start) as u16 * spacing, y),
                style::SetForegroundColor(style::Color::Black),
                style::SetBackgroundColor(style::Color::White),
                style::Print({
@@ -120,7 +120,7 @@ pub fn print_typing(mut x: Range<u16>, y: u16, string: &String, cursor: Option<u
 }
 
 pub fn center_offset(center: u16, width: u16) -> u16 {
-    return (safe_sub!(f32; center as f32, width as f32) / 2.0) as u16;
+    return ((center as f32 - width as f32).max(0.0) / 2.0) as u16;
 }
 
 pub fn visible_scrolled(size: u16, length: usize, selected: usize) -> Range<usize> {

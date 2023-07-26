@@ -1,5 +1,5 @@
-use orion::{aead::{self, SecretKey}, errors::UnknownCryptoError as CryptoError};
-use std::{io::{self, Write}, fs, env, time, cmp::min, ops::Range};
+use orion::{aead::{open, seal, SecretKey}, errors::UnknownCryptoError as CryptoError};
+use std::{io::{Stdout, stdout, Write}, fs, env, time, cmp::min, ops::Range};
 use serde::{Serialize, Deserialize};
 use clipboard::{ClipboardProvider, ClipboardContext};
 use crossterm::{queue, execute, cursor, style, terminal, event};
@@ -48,17 +48,13 @@ enum MasterPassResult {
 
 #[macro_export]
 macro_rules! safe_sub {
-    ($t:ty; $a:expr, $b:expr) => {{
-        if $b >= $a {
-            <$t>::default()
-        } else {
-            $a as $t - $b as $t
-        }
+    ($a:expr, $b:expr) => {{
+        $a.checked_sub($b).unwrap_or_default()
     }}
 }
 
 fn main() {
-    let mut stdout = io::stdout();
+    let mut stdout = stdout();
 
     let mut filename: Option<String> = {
         if let Ok(dir_env) = env::var("PASSRS_FILE") {
@@ -178,7 +174,7 @@ fn main() {
             if let Ok(bytes) = fs::read(&filename) {
                 let json = {
                     if let Some(ref master_key) = master_pk {
-                        if let Ok(json) = aead::open(master_key, &bytes) {
+                        if let Ok(json) = open(master_key, &bytes) {
                             json
 
                         } else {
@@ -229,7 +225,7 @@ fn main() {
                     let json = serde_json::to_string(&password_set).unwrap();
 
                     if let Some(ref master_key) = master_pk {
-                        if let Ok(bytes) = aead::seal(master_key, &json.clone().into_bytes()) {
+                        if let Ok(bytes) = seal(master_key, &json.clone().into_bytes()) {
                             bytes
                         } else {
                             eprintln!("Could not encrypt JSON:\n{}", &json);
@@ -250,9 +246,9 @@ fn main() {
 }
 
 fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
-    let mut stdout = io::stdout();
+    let mut stdout = stdout();
 
-    use event::{Event, KeyCode};
+    use event::KeyCode;
     let mut clip: ClipboardContext = ClipboardProvider::new().unwrap();
     let mut tab = DEFAULT_TAB;
     let mut show_all = false;
@@ -267,7 +263,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
         let list_length = match tab { Tab::Password => password_set.pass.len(), Tab::Totp => password_set.totp.len() };
 
         if size.0 > 1 && size.1 > 1 {
-            let view = ui::visible_scrolled(safe_sub!(u16; size.1, 1), list_length, *list_scroll);
+            let view = ui::visible_scrolled(safe_sub!(size.1, 1), list_length, *list_scroll);
 
             match tab {
                 Tab::Password => {
@@ -284,11 +280,11 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                                 format!(" {name:width$} {pass} ",
                                         name = this_pass.name,
                                         pass = this_pass.password,
-                                        width = safe_sub!(usize; safe_sub!(usize; size.0, 3), this_pass.password.char_indices().count()))
+                                        width = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count()))
                             } else {
                                 format!(" {name:width$}",
                                         name = this_pass.name,
-                                        width = safe_sub!(usize; size.0, 1))
+                                        width = safe_sub!(size.0 as usize, 1))
                             };
 
                         if this_pass.delete {
@@ -341,11 +337,11 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                                         name = this_totp.name,
                                         code1 = this_totp_code[..this_totp.data.digits / 2].to_string(),
                                         code2 = this_totp_code[this_totp.data.digits / 2..].to_string(),
-                                        width = safe_sub!(usize; safe_sub!(usize; size.0, 4), this_totp.data.digits))
+                                        width = safe_sub!(safe_sub!(size.0 as usize, 4), this_totp.data.digits))
                             } else {
                                 format!(" {name:width$}",
                                         name = this_totp.name,
-                                        width = safe_sub!(usize; size.0, 1))
+                                        width = safe_sub!(size.0 as usize, 1))
                             };
 
                         if this_totp.delete {
@@ -539,7 +535,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
 }
 
 fn master_pass_ui() -> MasterPassResult {
-    let mut stdout = io::stdout();
+    let mut stdout = stdout();
 
     let mut pass = String::new();
 
@@ -585,9 +581,9 @@ fn master_pass_ui() -> MasterPassResult {
 }
 
 fn edit_values_ui(title: &str, values: &mut [EditMenuValue], ui_colour: style::Color) -> bool {
-    use event::{Event, KeyCode};
+    use event::KeyCode;
 
-    let mut stdout = io::stdout();
+    let mut stdout = stdout();
     let mut selected: usize = 0;
     let mut string_index: usize = {
         if let EditMenuValue::String(_, string_val) = &values[selected] {
@@ -703,7 +699,7 @@ fn shift_item<T>(vec: &mut Vec<T>, selected: &mut usize, up: bool) {
 }
 
 #[inline]
-fn enter_alt_screen(stdout: &mut io::Stdout) {
+fn enter_alt_screen(stdout: &mut Stdout) {
     execute!(stdout,
              terminal::EnterAlternateScreen,
              terminal::DisableLineWrap,
@@ -712,7 +708,7 @@ fn enter_alt_screen(stdout: &mut io::Stdout) {
 }
 
 #[inline]
-fn exit_alt_screen(stdout: &mut io::Stdout) {
+fn exit_alt_screen(stdout: &mut Stdout) {
     terminal::disable_raw_mode();
     execute!(stdout,
              terminal::LeaveAlternateScreen,
