@@ -10,6 +10,7 @@ mod ui;
 
 const THEME_COLOUR: style::Color = style::Color::Red;
 const POLL_TIME: time::Duration = time::Duration::from_millis(100);
+const DEFAULT_TAB: Tab = Tab::Totp;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Passwords {
@@ -47,20 +48,95 @@ macro_rules! safe_sub {
 
 fn main() {
     let mut stdout = io::stdout();
-    let mut error = String::new();
 
-    execute!(stdout,
-             terminal::EnterAlternateScreen,
-             terminal::DisableLineWrap,
-             cursor::Hide);
-    terminal::enable_raw_mode();
+    let mut filename: Option<String> = {
+        if let Ok(dir_env) = env::var("PASSRS_FILE") {
+            Some(dir_env.to_string())
+
+        } else if let Ok(dir_home) = env::var("HOME") {
+            Some(format!("{}/.local/share/passrs", dir_home))
+
+        } else {
+            None
+        }
+    };
+
+    let mut script_print: Option<Tab> = None;
+
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match &arg as &str {
+            "--file" | "-f" => {
+                filename = Some(args.next().expect("Expected a filename"));
+            },
+            "--totp" | "-t" => {
+                script_print = Some(Tab::Totp);
+            },
+            "--pass" | "-p" => {
+                script_print = Some(Tab::Password);
+            },
+            "--help" | "-h" => {
+                println!("    passrs ~ Terminal password manager and authenticator");
+                println!("");
+                println!("passrs takes the following commandline arguments:");
+                println!("--file, -f FILE     Specify a (possibly encrypted) file to read data from");
+                println!("--totp, -t          Print all current TOTP codes and their names, useful for scripts");
+                println!("--pass, -p          Print all passwords and their names, useful for scripts");
+                println!("");
+                println!("--help, -h          Print general help");
+                println!("--help-gui, -H      Print help regarding GUI navigation");
+                println!("");
+                println!("passrs also reads the following environment variables:");
+                println!("    HOME            The default data file is `$HOME/.local/share/passrs`");
+                println!("    PASSRS_FILE     Set the file to read data from, overridden by `--file`, `-f`");
+                println!("    PASSRS_PASS     Specify a password for passrs to use, bypassing the GUI password dialog");
+                println!("    PASSRS_NOPASS   Specify that passrs shouldn't use encryption, bypassing the GUI password dialog");
+                return;
+            },
+            "--help-gui" | "-H" => {
+                println!("    passrs ~ GUI navigation help");
+                println!("");
+                println!("In the main view:");
+                println!("    Tab             Switch between passwords and TOTP codes");
+                println!("    Up/Down/j/k     Select the above/below item");
+                println!("    Home/End/g/G    Select the first/last item");
+                println!("    J/K             Move the selected item up/down");
+                println!("    d               Mark the selected item for deletion upon exiting");
+                println!("    v               Toggle viewing unselected items");
+                println!("    n               Toggle viewing next TOTP code");
+                println!("    e               Edit the selected item");
+                println!("    o               Create a new item and edit it");
+                println!("    p               Change encryption password for the current data file");
+                println!("    Esc/q           Exit and save, excluding items marked for deletion");
+                println!("");
+                println!("In the edit item view:");
+                println!("    Up/Down         Select the above/below field");
+                println!("    Left/Right/Home/End    Move the cursor in a text field");
+                println!("    Left/Right      Increment/Decrement a number field");
+                println!("    Enter           Exit and save current item");
+                println!("    Esc             Exit and cancel adding/editing item");
+                println!("    *               Type in the selected text field");
+                println!("");
+                println!("In the password dialog:");
+                println!("    Enter           Supply the current password, or if empty, disable encryption");
+                println!("    Escape          Cancel entering password");
+                println!("    *               Type in the password field");
+                return;
+            },
+            a => {
+                eprintln!("Unknown argument, `{}`, see `--help`, `-h`", a);
+                return;
+            }
+        }
+    }
 
     'main: {
+        /*
         let filename: String = {
             if let Some(dir_arg) = env::args().collect::<Vec<String>>().get(1) {
                 dir_arg.to_string()
 
-            } else if let Ok(dir_env) = env::var("PASSRS_DIR") {
+            } else if let Ok(dir_env) = env::var("PASSRS_FILE") {
                 dir_env.to_string()
 
             } else if let Ok(dir_home) = env::var("HOME") {
@@ -71,6 +147,8 @@ fn main() {
                 break 'main;
             }
         };
+        */
+        let filename = filename.unwrap();
 
         let mut master_pk: Option<SecretKey> = {
             if let Ok(_) = env::var("PASSRS_NOPASS") {
@@ -81,10 +159,16 @@ fn main() {
                 Some(key)
 
             } else {
-                match master_pass_ui() {
-                    MasterPassResult::Password(pass) => Some(generate_orion_key(&pass).unwrap()),
-                    MasterPassResult::NoPassword => None,
-                    MasterPassResult::Cancel => { break 'main; },
+                if script_print == None {
+                    match master_pass_ui() {
+                        MasterPassResult::Password(pass) => Some(generate_orion_key(&pass).unwrap()),
+                        MasterPassResult::NoPassword => None,
+                        MasterPassResult::Cancel => { break 'main; },
+                    }
+
+                } else {
+                    eprintln!("Print mode requires a password to be specified with PASSRS_PASS or PASSRS_NOPASS");
+                    return;
                 }
             }
         };
@@ -97,7 +181,7 @@ fn main() {
                             json
 
                         } else {
-                            error = "Cannot decrypt data with provided password".to_string();
+                            eprintln!("Cannot decrypt data with provided password");
                             break 'main;
                         }
 
@@ -110,65 +194,73 @@ fn main() {
                     passwords
 
                 } else {
-                    error = format!("Cannot parse raw JSON, you might require a password:\n{}", String::from_utf8_lossy(&json));
+                    eprintln!("Cannot parse raw JSON, you might require a password:\n{}", String::from_utf8_lossy(&json));
                     break 'main;
                 }
 
             } else {
-                error = "Cannot read file, making new password set".to_string();
+                eprintln!("Cannot read file, making new password set");
                 Passwords { pass: Vec::new(), totp: Vec::new() }
             }
         };
 
-        main_ui(&mut password_set, &mut master_pk);
+        match script_print {
+            Some(Tab::Password) => {
+                for pass in &password_set.pass {
+                    println!("{}\t{}", pass.name, pass.password);
+                }
+            },
+            Some(Tab::Totp) => {
+                for totp in &mut password_set.totp {
+                    totp.calculate_codes();
+                    println!("{}\t{}", totp.name, totp.get_code(false));
+                }
+            },
+            None => {
+                main_ui(&mut password_set, &mut master_pk);
 
-        password_set.pass.retain(|p| !p.delete);
-        password_set.totp.retain(|t| !t.delete);
+                password_set.pass.retain(|p| !p.delete);
+                password_set.totp.retain(|t| !t.delete);
 
-        let bytes = {
-            let json = serde_json::to_string(&password_set).unwrap();
+                let bytes = {
+                    let json = serde_json::to_string(&password_set).unwrap();
 
-            if let Some(ref master_key) = master_pk {
-                if let Ok(bytes) = aead::seal(master_key, &json.clone().into_bytes()) {
-                    bytes
-                } else {
-                    error = format!("Could not encrypt JSON:\n{}", &json);
+                    if let Some(ref master_key) = master_pk {
+                        if let Ok(bytes) = aead::seal(master_key, &json.clone().into_bytes()) {
+                            bytes
+                        } else {
+                            eprintln!("Could not encrypt JSON:\n{}", &json);
+                            break 'main;
+                        }
+                    } else {
+                        json.into_bytes()
+                    }
+                };
+
+                if fs::write(&filename, bytes).is_err() {
+                    eprintln!("Could not save file");
                     break 'main;
                 }
-            } else {
-                json.into_bytes()
-            }
-        };
-
-        if fs::write(&filename, bytes).is_err() {
-            error = "Could not save file".to_string();
-            break 'main;
+            },
         }
     }
-
-    terminal::disable_raw_mode();
-    execute!(stdout,
-             terminal::LeaveAlternateScreen,
-             terminal::EnableLineWrap,
-             cursor::Show);
-    stdout.flush();
-
-    eprintln!("{}", error);
 }
 
 fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
+    let mut stdout = io::stdout();
+
+    enter_alt_screen(&mut stdout);
+
     use event::{Event, KeyCode};
     let mut clip: ClipboardContext = ClipboardProvider::new().unwrap();
-
-    let mut stdout = io::stdout();
-    let mut tab = Tab::Password;
+    let mut tab = DEFAULT_TAB;
     let mut show_all = false;
     let mut totp_next = false;
     let mut totp_last_time: u64 = 0;
     let mut pass_scroll: usize = 0;
     let mut totp_scroll: usize = 0;
 
-    loop {
+    'ui: loop {
         let size = terminal::size().unwrap();
         let list_scroll = match tab { Tab::Password => &mut pass_scroll, Tab::Totp => &mut totp_scroll };
         let list_length = match tab { Tab::Password => password_set.pass.len(), Tab::Totp => password_set.totp.len() };
@@ -293,7 +385,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
             let keyev = ui::input_key(&ev);
 
             match keyev {
-                KeyCode::Esc | KeyCode::Char('q') => return,
+                KeyCode::Esc | KeyCode::Char('q') => break 'ui,
                 KeyCode::Tab => {
                     tab = match tab { Tab::Password => Tab::Totp, Tab::Totp => Tab::Password };
                 },
@@ -440,13 +532,18 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
             }
         }
     }
+
+    exit_alt_screen(&mut stdout);
 }
 
 fn master_pass_ui() -> MasterPassResult {
     let mut stdout = io::stdout();
+
+    enter_alt_screen(&mut stdout);
+
     let mut pass = String::new();
 
-    loop {
+    let master_pass = 'ui: loop {
         let size = terminal::size().unwrap();
         queue!(stdout,
                terminal::Clear(terminal::ClearType::All),
@@ -472,17 +569,21 @@ fn master_pass_ui() -> MasterPassResult {
         match ui::input_string(&mut pass, &mut index, ev_key) {
             ui::AfterAction::Enter => {
                 if pass.len() == 0 {
-                    break MasterPassResult::NoPassword;
+                    break 'ui MasterPassResult::NoPassword;
                 } else {
-                    break MasterPassResult::Password(format!("{:32}", pass));
+                    break 'ui MasterPassResult::Password(pass);
                 }
             },
             ui::AfterAction::Cancel => {
-                break MasterPassResult::Cancel;
+                break 'ui MasterPassResult::Cancel;
             },
             _ => {},
         }
-    }
+    };
+
+    exit_alt_screen(&mut stdout);
+
+    return master_pass;
 }
 
 fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
@@ -499,7 +600,7 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
     }
 ;
 
-    loop {
+    'ui: loop {
         let size = terminal::size().unwrap();
 
         queue!(stdout,
@@ -539,10 +640,10 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue]) -> bool {
 
             match keyev {
                 KeyCode::Esc => {
-                    return false;
+                    break 'ui false;
                 },
                 KeyCode::Enter => {
-                    return true;
+                    break 'ui true;
                 },
                 KeyCode::Up => {
                     if selected == 0 {
@@ -604,7 +705,27 @@ fn shift_item<T>(vec: &mut Vec<T>, selected: &mut usize, up: bool) {
 }
 
 #[inline]
+fn enter_alt_screen(stdout: &mut io::Stdout) {
+    execute!(stdout,
+             terminal::EnterAlternateScreen,
+             terminal::DisableLineWrap,
+             cursor::Hide);
+    terminal::enable_raw_mode();
+}
+
+#[inline]
+fn exit_alt_screen(stdout: &mut io::Stdout) {
+    terminal::disable_raw_mode();
+    execute!(stdout,
+             terminal::LeaveAlternateScreen,
+             terminal::EnableLineWrap,
+             cursor::Show);
+    stdout.flush();
+}
+
+#[inline]
 fn generate_orion_key(key: &str) -> Result<SecretKey, CryptoError> {
-    let bytes = key.as_bytes();
+    let padded = format!("{:32}", key);
+    let bytes = padded.as_bytes();
     return SecretKey::from_slice(&bytes);
 }

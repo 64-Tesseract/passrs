@@ -8,7 +8,7 @@ pub struct TotpCode {
     raw_secret: Option<String>,
     pub data: TOTP,
     #[serde(skip, default = "Option::default")]
-    pub cached_codes: Option<(String, String)>,
+    cached_codes: Option<(String, String)>,
     #[serde(skip, default = "bool::default")]
     pub delete: bool,
 }
