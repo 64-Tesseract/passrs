@@ -447,23 +447,27 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                     password_set.ui_colour = (password_set.ui_colour + 1) % COLOURS.len();
                 },
                 KeyCode::Char('y') => {
-                    match tab {
-                        Tab::Password => {
-                            clip.set_contents(password_set.pass[pass_scroll].password.clone());
-                        },
-                        Tab::Totp => {
-                            clip.set_contents(password_set.totp[totp_scroll].get_code(totp_next).to_string());
-                        },
+                    if list_length != 0 {
+                        match tab {
+                            Tab::Password => {
+                                clip.set_contents(password_set.pass[pass_scroll].password.clone());
+                            },
+                            Tab::Totp => {
+                                clip.set_contents(password_set.totp[totp_scroll].get_code(totp_next).to_string());
+                            },
+                        }
                     }
                 },
                 KeyCode::Char('d') => {
-                    match tab {
-                        Tab::Password => {
-                            password_set.pass[pass_scroll].delete = !password_set.pass[pass_scroll].delete;
-                        },
-                        Tab::Totp => {
-                            password_set.totp[totp_scroll].delete = !password_set.totp[totp_scroll].delete;
-                        },
+                    if list_length != 0 {
+                        match tab {
+                            Tab::Password => {
+                                password_set.pass[pass_scroll].delete = !password_set.pass[pass_scroll].delete;
+                            },
+                            Tab::Totp => {
+                                password_set.totp[totp_scroll].delete = !password_set.totp[totp_scroll].delete;
+                            },
+                        }
                     }
                 },
                 KeyCode::Char('e') => {
