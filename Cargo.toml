@@ -1,5 +1,5 @@
 [package]
-name = "passrs"
+name = "passrs-tui"
 authors = ["64_Tesseract"]
 description = "A terminal \"GUI\" password manager & authenticator"
 repository = "https://github.com/64-Tesseract/passrs"
@@ -7,6 +7,10 @@ keywords = ["2fa", "password_manager", "tui", "encrypted"]
 version = "1.2.5"
 edition = "2021"
 license-file = "NO-LICENSE"
+
+[[bin]]
+name = "passrs"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 # no
