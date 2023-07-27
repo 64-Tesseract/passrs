@@ -1,5 +1,5 @@
 use orion::{aead::{open, seal, SecretKey}, errors::UnknownCryptoError as CryptoError};
-use std::{io::{Stdout, stdout, Write}, fs, env, time, cmp::min, ops::Range};
+use std::{io::{Stdout, stdout, Write}, process, fs, env, time, cmp::min, ops::Range};
 use serde::{Serialize, Deserialize};
 use clipboard::{ClipboardProvider, ClipboardContext};
 use crossterm::{queue, execute, cursor, style, terminal, event};
@@ -83,7 +83,7 @@ fn main() {
                 script_print = Some(Tab::Password);
             },
             "--help" | "-h" => {
-                println!("    passrs ~ Terminal password manager and authenticator");
+                println!("    passrs ~ Terminal Password Manager & Authenticator");
                 println!("");
                 println!("passrs takes the following commandline arguments:");
                 println!("--file, -f FILE     Specify a (possibly encrypted) file to read data from");
@@ -98,10 +98,14 @@ fn main() {
                 println!("    PASSRS_FILE     Set the file to read data from, overridden by `--file`, `-f`");
                 println!("    PASSRS_PASS     Specify the password (or explicitly no password) for passrs to use,");
                 println!("                        bypassing the GUI password dialog");
+                println!("");
+                println!("Return code 0:      Nothing went wrong (hopefully)");
+                println!("Return code 1:      Error loading or decrypting data");
+                println!("Return code 2:      Error saving or encrypting data");
                 return;
             },
             "--help-gui" | "-H" => {
-                println!("    passrs ~ GUI navigation help");
+                println!("    passrs ~ GUI Navigation Help");
                 println!("");
                 println!("In the main view:");
                 println!("    Tab             Switch between passwords and TOTP codes");
@@ -165,7 +169,8 @@ fn main() {
 
                 } else {
                     eprintln!("Print mode requires a password to be specified with PASSRS_PASS");
-                    return;
+                    process::exit(1);
+                    // break 'main;
                 }
             }
         };
@@ -179,7 +184,8 @@ fn main() {
 
                         } else {
                             eprintln!("Cannot decrypt data with provided password");
-                            break 'main;
+                            process::exit(1);
+                            // break 'main;
                         }
 
                     } else {
@@ -192,7 +198,8 @@ fn main() {
 
                 } else {
                     eprintln!("Cannot parse raw JSON, you might require a password:\n{}", String::from_utf8_lossy(&json));
-                    break 'main;
+                    process::exit(1);
+                    // break 'main;
                 }
 
             } else {
@@ -214,6 +221,9 @@ fn main() {
                 }
             },
             None => {
+                // Don't crash trying to load a data file from a modded passrs with more than 15 colours
+                password_set.ui_colour %= COLOURS.len();
+
                 enter_alt_screen(&mut stdout);
                 main_ui(&mut password_set, &mut master_pk);
                 exit_alt_screen(&mut stdout);
@@ -229,7 +239,8 @@ fn main() {
                             bytes
                         } else {
                             eprintln!("Could not encrypt JSON:\n{}", &json);
-                            break 'main;
+                            process::exit(2);
+                            // break 'main;
                         }
                     } else {
                         json.into_bytes()
@@ -238,7 +249,8 @@ fn main() {
 
                 if fs::write(&filename, bytes).is_err() {
                     eprintln!("Could not save file");
-                    break 'main;
+                    process::exit(2);
+                    // break 'main;
                 }
             },
         }
@@ -272,19 +284,21 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                            cursor::MoveTo(ui::center_offset(size.0, 9), 0),
                            style::Print("Passwords"));
 
+                    let avail_name_len = safe_sub!(size.0 as usize, 1);
                     for (index, y_pos) in view.zip(1..size.1) {
                         let this_pass = &password_set.pass[index];
 
                         let pass_string =
                             if show_all || index == *list_scroll {
+                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count());
                                 format!(" {name:width$} {pass} ",
-                                        name = this_pass.name,
+                                        name = clip_string(&this_pass.name, avail_name_len),
                                         pass = this_pass.password,
-                                        width = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count()))
+                                        width = avail_name_len)
                             } else {
                                 format!(" {name:width$}",
-                                        name = this_pass.name,
-                                        width = safe_sub!(size.0 as usize, 1))
+                                        name = clip_string(&this_pass.name, avail_name_len),
+                                        width = avail_name_len)
                             };
 
                         if this_pass.delete {
@@ -327,21 +341,23 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                         }
                     }
 
+                    let avail_name_len = safe_sub!(size.0 as usize, 1);
                     for (index, y_pos) in view.zip(1..size.1) {
                         let this_totp = &password_set.totp[index];
 
                         let totp_string =
                             if show_all || index == *list_scroll {
                                 let this_totp_code = this_totp.get_code(totp_next);
+                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 4), this_totp.data.digits);
                                 format!(" {name:width$} {code1} {code2} ",
-                                        name = this_totp.name,
+                                        name = clip_string(&this_totp.name, avail_name_len),
                                         code1 = this_totp_code[..this_totp.data.digits / 2].to_string(),
                                         code2 = this_totp_code[this_totp.data.digits / 2..].to_string(),
-                                        width = safe_sub!(safe_sub!(size.0 as usize, 4), this_totp.data.digits))
+                                        width = avail_name_len)
                             } else {
                                 format!(" {name:width$}",
-                                        name = this_totp.name,
-                                        width = safe_sub!(size.0 as usize, 1))
+                                        name = clip_string(&this_totp.name, avail_name_len),
+                                        width = avail_name_len)
                             };
 
                         if this_totp.delete {
@@ -695,6 +711,18 @@ fn shift_item<T>(vec: &mut Vec<T>, selected: &mut usize, up: bool) {
             vec.swap(*selected, *selected + 1);
             *selected += 1;
         }
+    }
+}
+
+#[inline]
+fn clip_string(string: &String, len: usize) -> String {
+    if string.char_indices().count() > len {
+        let ellipses_len = safe_sub!(len, 4);
+        format!("{}...", string.char_indices().take_while(|(i, _)| *i < ellipses_len).map(|(_, c)| c).collect::<String>())
+        // format!("{} > {}", string.char_indices().count(), len)
+    } else {
+        string.to_string()
+        // format!("{} < {}", string.char_indices().count(), len)
     }
 }
 

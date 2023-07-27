@@ -78,7 +78,7 @@ pub fn input_key(ev: &Event) -> KeyCode {
 pub fn print_typing(mut x: Range<u16>, y: u16, string: &String, cursor: Option<usize>) {
     let mut stdout = stdout();
     let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().or(Some(1)).unwrap() as u16;
-    x.end = x.end / spacing + spacing;
+    x.end = x.end / spacing + spacing - 2;
 
     let scroll_range = visible_scrolled(x.len() as u16, string.char_indices().count(), cursor.or(Some(0)).unwrap());
     let scroll_start = scroll_range.start;

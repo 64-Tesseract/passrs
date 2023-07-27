@@ -1,9 +1,15 @@
 [package]
 name = "passrs"
-version = "1.2.1"
+authors = ["64_Tesseract"]
+description = "A terminal \"GUI\" password manager & authenticator"
+repository = "https://github.com/64-Tesseract/passrs"
+keywords = ["2fa", "password_manager", "tui", "encrypted"]
+version = "1.2.5"
 edition = "2021"
+license-file = "NO-LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# no
 
 [dependencies]
 clipboard = "0.5.0"
@@ -11,6 +17,6 @@ crossterm = "0.26.1"
 crypto = { version = "0.5.0", features = ["aead"] }
 orion = "0.17.4"
 rand = "0.8.5"
-serde = { version = "1.0.164", features = ["derive"] }
+serde = "1.0.164"
 serde_json = "1.0.99"
 totp-rs = { version = "5.1.0", features = ["serde_support"] }
