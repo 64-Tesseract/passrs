@@ -1,6 +1,8 @@
 # passrs ~ Terminal Password Manager & Authenticator
 A "GUI" password and 2FA code manager, essentially a direct upgrade from [my C terminal authenticator](https://github.com/64-Tesseract/ncAuth).
 
+**Important note:** You need to install Xorg libraries (`xorg-devel`, `libxcb-devel`) for *passrs* to compile the clipboard module.
+
 ![An image, obviously](demo.png)
 
 ## Features
