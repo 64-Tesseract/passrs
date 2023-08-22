@@ -290,7 +290,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
 
                         let pass_string =
                             if show_all || index == *list_scroll {
-                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count());
+                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count() + 1);
                                 format!(" {name:width$} {pass} ",
                                         name = clip_string(&this_pass.name, avail_name_len),
                                         pass = this_pass.password,
