@@ -4,7 +4,7 @@ authors = ["64_Tesseract"]
 description = "A terminal \"GUI\" password manager & authenticator"
 repository = "https://github.com/64-Tesseract/passrs"
 keywords = ["2fa", "password_manager", "tui", "encrypted"]
-version = "1.2.6"
+version = "1.3.0"
 edition = "2021"
 license-file = "NO-LICENSE"
 
@@ -16,7 +16,6 @@ path = "src/main.rs"
 # no
 
 [dependencies]
-clipboard = "0.5.0"
 crossterm = "0.26.1"
 crypto = { version = "0.5.0", features = ["aead"] }
 orion = "0.17.4"

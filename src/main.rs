@@ -1,8 +1,8 @@
-use orion::{aead::{open, seal, SecretKey}, errors::UnknownCryptoError as CryptoError};
-use std::{io::{Stdout, stdout, Write}, process, fs, env, time, cmp::min, ops::Range};
-use serde::{Serialize, Deserialize};
-use clipboard::{ClipboardProvider, ClipboardContext};
-use crossterm::{queue, execute, cursor, style, terminal, event};
+use orion::{ aead::{ open, seal, SecretKey }, errors::UnknownCryptoError as CryptoError };
+use std::{ io::{ Stdout, stdout, Write }, process, fs, env, time, cmp::min, ops::Range };
+use serde::{ Serialize, Deserialize };
+use crossterm::{ queue, execute, cursor, style, terminal, event };
+use std::process::{ Command, Stdio };
 
 mod totp;
 mod pass;
@@ -98,6 +98,8 @@ fn main() {
                 println!("    PASSRS_FILE     Set the file to read data from, overridden by `--file`, `-f`");
                 println!("    PASSRS_PASS     Specify the password (or explicitly no password) for passrs to use,");
                 println!("                        bypassing the GUI password dialog");
+                println!("    PASSRS_COPY     Specify the shell command to copy a password/token via stdin,");
+                println!("                        defaults to `xclip -selection clipboard`");
                 println!("");
                 println!("Return code 0:      Nothing went wrong (hopefully)");
                 println!("Return code 1:      Error loading or decrypting data");
@@ -145,6 +147,14 @@ fn main() {
 
     'main: {
         let filename = filename.unwrap();
+
+        let copy_cmd: String = {
+            if let Ok(pass_env) = env::var("PASSRS_COPY") {
+                pass_env
+            } else {
+                "xclip -selection clipboard".to_string()
+            }
+        };
 
         let mut master_pk: Option<SecretKey> = {
             if let Ok(pass_env) = env::var("PASSRS_PASS") {
@@ -225,7 +235,7 @@ fn main() {
                 password_set.ui_colour %= COLOURS.len();
 
                 enter_alt_screen(&mut stdout);
-                main_ui(&mut password_set, &mut master_pk);
+                main_ui(&mut password_set, &mut master_pk, copy_cmd);
                 exit_alt_screen(&mut stdout);
 
                 password_set.pass.retain(|p| !p.delete);
@@ -257,11 +267,10 @@ fn main() {
     }
 }
 
-fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
+fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy_cmd: String) {
     let mut stdout = stdout();
 
     use event::KeyCode;
-    let mut clip: ClipboardContext = ClipboardProvider::new().unwrap();
     let mut tab = DEFAULT_TAB;
     let mut show_all = false;
     let mut totp_next = false;
@@ -450,10 +459,10 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>) {
                     if list_length != 0 {
                         match tab {
                             Tab::Password => {
-                                clip.set_contents(password_set.pass[pass_scroll].password.clone());
+                                clipboard(&password_set.pass[pass_scroll].password, &copy_cmd);
                             },
                             Tab::Totp => {
-                                clip.set_contents(password_set.totp[totp_scroll].get_code(totp_next).to_string());
+                                clipboard(&password_set.totp[totp_scroll].get_code(totp_next).to_string(), &copy_cmd);
                             },
                         }
                     }
@@ -700,6 +709,15 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue], ui_colour: style::C
             }
         }
     }
+}
+
+fn clipboard(value: &String, cmd: &String) {
+    let copy_process = Command::new("sh").arg("-c")
+        .arg(cmd)
+        .stdin(Stdio::piped())
+        .spawn().expect("Could not spawn shell to copy");
+
+    copy_process.stdin.unwrap().write(value.as_bytes());
 }
 
 fn shift_item<T>(vec: &mut Vec<T>, selected: &mut usize, up: bool) {

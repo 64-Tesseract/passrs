@@ -1,7 +1,8 @@
 # passrs ~ Terminal Password Manager & Authenticator
 A "GUI" password and 2FA code manager, essentially a direct upgrade from [my C terminal authenticator](https://github.com/64-Tesseract/ncAuth).
 
-**Important note:** You need to install Xorg libraries (`xorg-devel`, `libxcb-devel`) for *passrs* to compile the clipboard module.
+~~**Important note:** You need to install Xorg libraries (`xorg-devel`, `libxcb-devel`) for *passrs* to compile the clipboard module.~~
+**More important note:** I got rid of the clipboard library, no need for extra dependencies now
 
 ![An image, obviously](demo.png)
 
@@ -9,11 +10,11 @@ A "GUI" password and 2FA code manager, essentially a direct upgrade from [my C t
 - Scriptability with command-line arguments and environment variables
 - `Option<Encryption>` using a 32-byte master password (shorter passwords are padded with `\0`s, longer ones are clipped)
 - Vim-ish keybindings
-- Copy password or 2FA token to clipboard, you can also view the next 2FA token if you alt-tab slowly
+- Copy password or 2FA token to clipboard, you can also get the next 2FA token if you're a slow alt-tabber
 - Unicode auto-password generation (what hacker would even *try* to guess `񗗷􀛿𒔽𴕙򑑌󚖵񪣼򧩮󟛢򎈢􄪠񇻲󶽽񄒀񿕗񩝗`?)  
   ~~yeah ok but what website would even *try* support it? like it doesn't even have a single uppercase letter or special symbol~~
 - Passwords show you how to type each non-standard character using ctrl-shift-U (in edit mode, move the cursor along each character)
-- 40x more bloated than the C version
+- 40x more bloated than the C version lesgoooo
 
 ## Usage
 I won't go over every detail, since `passrs --help` should tell you all you need. But for a quick rundown:
@@ -33,11 +34,12 @@ I won't go over every detail, since `passrs --help` should tell you all you need
 - **How secure are the encrypted passwords/2FA codes?**  
   I wouldn't bet much on the security if glowies got their hands on it, but it should be enough to stop the average Kali "hacker". Refer to [some "onion" library I use](https://docs.rs/orion/0.15.5/orion/index.html) for actual details.
 - **Do Unicode passwords even work in websites? How are weird characters handled by server software?**  
-  Hell if I know, I've had this idea for ages but never got a chance to test it out. ~~Be my test subjects and brick your accounts for me >:)~~
-- **How about clipboard for Wayl--**  
-  ew no  
-  ...Alright fine, I'm stuck with Sway on SXMO, so I guess you've got a point. In *ncAuth*, I simply called the user's shell script to copy stuff to any WM's clipboard, but I wasn't that big a fan of that solution.  
-  Instead, I've made sure to enable CLI access to *passrs*, so you can write a shell script to select and copy passwords/2FA codes using something like `dmenu`. See [`sxmo_passrs.sh`](sxmo_passrs.sh) for an example.
+  After using `passrs` personally, I can say that the vast majority don't support even Unicode - Steam seems to be the worst offender.  
+  Some websites do support Unicode, but give vague errors - usually, there's too many bytes in the password, so trimming it down by half seems to do the trick.  
+  Revolt, being a fellow Rust-based app, supports long Unicode passwords just fine :gigachad:
+- **How about clipboard for Wayland?**  
+  In *ncAuth*, I simply called the user's shell script to copy stuff to any WM's clipboard, and in the previous version of *passrs* I used a native library to set the clipboard instead. It was a bit dodgy though, singe it needed a couple external dependencies and the text was cleared when you closed *passrs* (?!)... Now though, it just runs a command from the env variable `PASSRS_COPY`, so you don't need to write long shell scripts but don't need external libraries either!
+  Also, I've made sure to enable CLI access to *passrs*, so if you like you can write a shell script to select and copy passwords/2FA codes using something like `dmenu`. This might be useful for SXMO, if you only want to use inbuilt "GUI"s - see [`sxmo_passrs.sh`](sxmo_passrs.sh) for an example script.
 - **How about Windows?**  
   ‍
 - **No license?**  
