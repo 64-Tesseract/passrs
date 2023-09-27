@@ -47,7 +47,7 @@ I won't go over every detail, since `passrs --help` should tell you all you need
   Also don't open the `NO-LICENCE` file, that's just to keep Cargo happy.
 
 ## Release log
-**1.4.0**
+**1.4.1**
 - Data file not overwritten with new encryption when nothing changed
 - Tweaked password/2FA display functions to prioritize name
 - ~~Added release log in `README.md`~~ (does this count as a feature???)
@@ -55,5 +55,5 @@ I won't go over every detail, since `passrs --help` should tell you all you need
 **1.3.0**
 - Replaced dodgy X clipboard library with just running `xclip`
 
-**1.2.0**
+**1.2.6**
 - lol i dont remember that far back

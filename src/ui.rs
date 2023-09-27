@@ -80,7 +80,7 @@ pub fn print_typing(mut x: (u16, u16), y: u16, string: &String, cursor: Option<u
     //let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().or(Some(1)).unwrap() as u16;
     let (spacing, mut characters) = spaced_chars(string);
 
-    let scroll = visible_scrolled(((x.1 - x.0) / spacing) as usize, string.char_indices().count(), cursor.or(Some(0)).unwrap());
+    let scroll = visible_scrolled(((x.1 - x.0) / spacing - 1) as usize, string.char_indices().count(), cursor.or(Some(0)).unwrap());
 
     queue!(stdout, style::Print(style::Attribute::Underlined));
     //for (index, (char_x, character)) in (0..).zip(characters.map(|(p, c)| (p - scroll.start as u16 * spacing, c)).filter(|(p, _)| scroll.contains(&(*p as usize)))) {
