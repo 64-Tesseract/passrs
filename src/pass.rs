@@ -17,8 +17,4 @@ impl Password {
             delete: false,
         }
     }
-
-    pub fn spaced_chars() -> Iter<(char, u16)> {
-        let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().or(Some(1)).unwrap() as u16;
-    }
 }

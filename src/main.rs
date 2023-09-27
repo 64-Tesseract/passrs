@@ -290,7 +290,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
         let list_length = match tab { Tab::Password => password_set.pass.len(), Tab::Totp => password_set.totp.len() };
 
         if size.0 > 1 && size.1 > 1 {
-            let view = ui::visible_scrolled(safe_sub!(size.1, 1), list_length, *list_scroll);
+            let view = ui::visible_scrolled(safe_sub!(size.1 as usize, 1), list_length, *list_scroll);
 
             match tab {
                 Tab::Password => {
@@ -299,37 +299,44 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                            cursor::MoveTo(ui::center_offset(size.0, 9), 0),
                            style::Print("Passwords"));
 
-                    let avail_name_len = safe_sub!(size.0 as usize, 1);
                     for (index, y_pos) in view.zip(1..size.1) {
                         let this_pass = &password_set.pass[index];
 
-                        let pass_string =
-                            if show_all || index == *list_scroll {
-                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 3), this_pass.password.char_indices().count() + 1);
-                                format!(" {name:width$} {pass} ",
-                                        name = clip_string(&this_pass.name, avail_name_len),
-                                        pass = this_pass.password,
-                                        width = avail_name_len)
-                            } else {
-                                format!(" {name:width$}",
-                                        name = clip_string(&this_pass.name, avail_name_len),
-                                        width = avail_name_len)
-                            };
+                        let (spacing, pass_chars) = ui::spaced_chars(&this_pass.password);
+                        let pass_space = safe_sub!(size.0, this_pass.name.len() as u16 + 4);
+                        let pass_fit = pass_space / spacing;
+                        let pass_len = this_pass.password.char_indices().count() as u16;
+                        let (pass_pos, truncated) = if pass_len > pass_fit {
+                            (safe_sub!(size.0, pass_fit * spacing + 1), true)
+                        } else {
+                            (safe_sub!(size.0, pass_len * spacing + 1), false)
+                        };
 
                         if this_pass.delete {
                             queue!(stdout, style::Print(style::Attribute::CrossedOut));
                         }
 
                         if index == *list_scroll {
-                            queue!(stdout,
-                                   cursor::MoveTo(0, y_pos),
-                                   style::SetForegroundColor(COLOURS[password_set.ui_colour]),
-                                   style::Print(pass_string));
+                            queue!(stdout, style::SetForegroundColor(COLOURS[password_set.ui_colour]));
+                        }
 
-                        } else {
-                            queue!(stdout,
-                                   cursor::MoveTo(0, y_pos),
-                                   style::Print(pass_string));
+                        queue!(stdout,
+                               cursor::MoveTo(1, y_pos),
+                               style::Print(clip_string(&this_pass.name, safe_sub!(size.0, 1) as usize)));
+
+                        if this_pass.name.len() as u16 + 6 <= size.0 && (index == *list_scroll || show_all) {
+                            for (char_pos, character) in pass_chars {
+                                if truncated && pass_pos + char_pos >= safe_sub!(size.0, spacing) {
+                                    queue!(stdout,
+                                           cursor::MoveTo(safe_sub!(size.0, safe_sub!(spacing, 3) + 4), y_pos),
+                                           style::Print("..."));
+                                    break;
+                                }
+
+                                queue!(stdout,
+                                       cursor::MoveTo(pass_pos + char_pos, y_pos),
+                                       style::Print(character));
+                            }
                         }
 
                         queue!(stdout,
@@ -356,20 +363,20 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                         }
                     }
 
-                    let avail_name_len = safe_sub!(size.0 as usize, 1);
                     for (index, y_pos) in view.zip(1..size.1) {
                         let this_totp = &password_set.totp[index];
 
                         let totp_string =
-                            if show_all || index == *list_scroll {
+                            if (this_totp.name.len() + this_totp.data.digits) as u16 + 4 < size.0 && (show_all || index == *list_scroll) {
                                 let this_totp_code = this_totp.get_code(totp_next);
-                                let avail_name_len = safe_sub!(safe_sub!(size.0 as usize, 4), this_totp.data.digits);
+                                let avail_name_len = safe_sub!(size.0 as usize, this_totp.data.digits + 4);
                                 format!(" {name:width$} {code1} {code2} ",
-                                        name = clip_string(&this_totp.name, avail_name_len),
+                                        name = this_totp.name,
                                         code1 = this_totp_code[..this_totp.data.digits / 2].to_string(),
                                         code2 = this_totp_code[this_totp.data.digits / 2..].to_string(),
                                         width = avail_name_len)
                             } else {
+                                let avail_name_len = safe_sub!(size.0 as usize, 1);
                                 format!(" {name:width$}",
                                         name = clip_string(&this_totp.name, avail_name_len),
                                         width = avail_name_len)
@@ -663,7 +670,7 @@ fn edit_values_ui(title: &str, values: &mut [EditMenuValue], ui_colour: style::C
             match &values[value_index] {
                 EditMenuValue::String(label, string_value) => {
                     queue!(stdout, style::Print(label));
-                    ui::print_typing(5..size.0, 3 + value_index as u16 * 3, string_value,
+                    ui::print_typing((5, size.0), 3 + value_index as u16 * 3, string_value,
                                      if selected == value_index { Some(string_index) } else { None });
                 },
                 EditMenuValue::Int(label, int_value, _) => {

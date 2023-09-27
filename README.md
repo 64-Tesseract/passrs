@@ -1,7 +1,7 @@
 # passrs ~ Terminal Password Manager & Authenticator
-A "GUI" password and 2FA code manager, essentially a direct upgrade from [my C terminal authenticator](https://github.com/64-Tesseract/ncAuth).
+A TUI (terminal "GUI") password and 2FA code manager, essentially a direct upgrade from [my C terminal authenticator](https://github.com/64-Tesseract/ncAuth).
 
-~~**Important note:** You need to install Xorg libraries (`xorg-devel`, `libxcb-devel`) for *passrs* to compile the clipboard module.~~
+~~**Important note:** You need to install Xorg libraries (`xorg-devel`, `libxcb-devel`) for *passrs* to compile the clipboard module.~~  
 **More important note:** I got rid of the clipboard library, no need for extra dependencies now
 
 ![An image, obviously](demo.png)
@@ -27,7 +27,7 @@ I won't go over every detail, since `passrs --help` should tell you all you need
 - Press `Enter` to save the edited item or `Esc` to cancel editing it, then `Esc` or `q` to quit the main GUI and save
 
 ## FAQ
-(Each question was asked exactly zero (0) times, but with my social life I consider that frequent)
+~~Each question was asked exactly zero (0) times, but with my social life I consider that frequent~~
 
 - **What does this thing run on?**  
   Anything that compiles Rust and that all the libraries support, which should also be anything that compiles Rust.
@@ -35,13 +35,25 @@ I won't go over every detail, since `passrs --help` should tell you all you need
   I wouldn't bet much on the security if glowies got their hands on it, but it should be enough to stop the average Kali "hacker". Refer to [some "onion" library I use](https://docs.rs/orion/0.15.5/orion/index.html) for actual details.
 - **Do Unicode passwords even work in websites? How are weird characters handled by server software?**  
   After using `passrs` personally, I can say that the vast majority don't support even Unicode - Steam seems to be the worst offender.  
-  Some websites do support Unicode, but give vague errors - usually, there's too many bytes in the password, so trimming it down by half seems to do the trick.  
+  Some websites partially support Unicode, but give vague errors - usually, there's too many bytes in the password, so trimming it down by half seems to do the trick.  
   Revolt, being a fellow Rust-based app, supports long Unicode passwords just fine :gigachad:
 - **How about clipboard for Wayland?**  
   In *ncAuth*, I simply called the user's shell script to copy stuff to any WM's clipboard, and in the previous version of *passrs* I used a native library to set the clipboard instead. It was a bit dodgy though, singe it needed a couple external dependencies and the text was cleared when you closed *passrs* (?!)... Now though, it just runs a command from the env variable `PASSRS_COPY`, so you don't need to write long shell scripts but don't need external libraries either!
-  Also, I've made sure to enable CLI access to *passrs*, so if you like you can write a shell script to select and copy passwords/2FA codes using something like `dmenu`. This might be useful for SXMO, if you only want to use inbuilt "GUI"s - see [`sxmo_passrs.sh`](sxmo_passrs.sh) for an example script.
+  Also, I've made sure to include a commandline interface to *passrs*, so if you like you can write a shell script to select and copy passwords/2FA codes using something like `dmenu`. This might be useful for SXMO, if you only want to use native dialogs - see [`sxmo_passrs.sh`](sxmo_passrs.sh) for an example script.
 - **How about Windows?**  
   ‍
 - **No license?**  
   No licence, go ham. If anyone insists that "intellectual property" isn't a completely delusional concept, then I claim `1` and `0` as my own.  
   Also don't open the `NO-LICENCE` file, that's just to keep Cargo happy.
+
+## Release log
+**1.4.0**
+- Data file not overwritten with new encryption when nothing changed
+- Tweaked password/2FA display functions to prioritize name
+- ~~Added release log in `README.md`~~ (does this count as a feature???)
+
+**1.3.0**
+- Replaced dodgy X clipboard library with just running `xclip`
+
+**1.2.0**
+- lol i dont remember that far back

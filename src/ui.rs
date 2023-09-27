@@ -75,29 +75,26 @@ pub fn input_key(ev: &Event) -> KeyCode {
     }
 }
 
-pub fn print_typing(mut x: Range<u16>, y: u16, string: &String, cursor: Option<usize>) {
+pub fn print_typing(mut x: (u16, u16), y: u16, string: &String, cursor: Option<usize>) {
     let mut stdout = stdout();
-    let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().or(Some(1)).unwrap() as u16;
-    x.end = x.end / spacing + spacing - 2;
+    //let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().or(Some(1)).unwrap() as u16;
+    let (spacing, mut characters) = spaced_chars(string);
 
-    let scroll_range = visible_scrolled(x.len() as u16, string.char_indices().count(), cursor.or(Some(0)).unwrap());
-    let scroll_start = scroll_range.start;
-    let characters: Vec<(usize, char)> = string.char_indices().collect();
+    let scroll = visible_scrolled(((x.1 - x.0) / spacing) as usize, string.char_indices().count(), cursor.or(Some(0)).unwrap());
 
     queue!(stdout, style::Print(style::Attribute::Underlined));
-    for (x_offset, char_index) in (0..).zip(scroll_range) {
-        let this_char = characters[char_index];
-
+    //for (index, (char_x, character)) in (0..).zip(characters.map(|(p, c)| (p - scroll.start as u16 * spacing, c)).filter(|(p, _)| scroll.contains(&(*p as usize)))) {
+    for (index, (char_x, character)) in scroll.clone().zip(characters[scroll.clone()].iter().map(|(p, c)| (p - scroll.start as u16 * spacing, c))) {
         queue!(stdout,
-               cursor::MoveTo(x.start + x_offset * spacing, y),
-               style::Print(format!("{}", this_char.1)));
+               cursor::MoveTo(x.0 + char_x, y),
+               style::Print(format!("{c:width$}", c = character, width = spacing as usize)));
 
         if let Some(pos) = cursor {
-            if pos == char_index as usize && this_char.1 as usize > 0x7f {
+            if pos == index && *character as usize > 0x7f {
                 queue!(stdout,
-                       cursor::MoveTo(x.start + x_offset * spacing, y + 1),
+                       cursor::MoveTo(x.0 + char_x, y + 1),
                        style::Print(style::Attribute::NoUnderline),
-                       style::Print(format!("\\u{:x}", this_char.1 as usize)),
+                       style::Print(format!("\\u{:x}", *character as usize)),
                        style::Print(style::Attribute::Underlined));
             }
         }
@@ -106,14 +103,14 @@ pub fn print_typing(mut x: Range<u16>, y: u16, string: &String, cursor: Option<u
 
     if let Some(pos) = cursor {
         queue!(stdout,
-               cursor::MoveTo(x.start + safe_sub!(pos, scroll_start) as u16 * spacing, y),
+               cursor::MoveTo(x.0 + safe_sub!(pos, scroll.start) as u16 * spacing, y),
                style::SetForegroundColor(style::Color::Black),
                style::SetBackgroundColor(style::Color::White),
                style::Print({
-                   if let Some(c) = string.char_indices().nth(pos) {
-                       c.1
+                   if let Some((_, c)) = string.char_indices().nth(pos) {
+                       format!("{c:width$}", c = c, width = spacing as usize)
                    } else {
-                       ' '
+                       format!("{c:width$}", c = "", width = spacing as usize)
                    }
                }));
     }
@@ -123,9 +120,12 @@ pub fn center_offset(center: u16, width: u16) -> u16 {
     return ((center as f32 - width as f32).max(0.0) / 2.0) as u16;
 }
 
-pub fn visible_scrolled(size: u16, length: usize, selected: usize) -> Range<usize> {
-    let size = size as usize;
+pub fn spaced_chars(string: &String) -> (u16, Vec<(u16, char)>) {
+    let spacing: u16 = string.char_indices().map(|(_, c)| c.len_utf8()).max().unwrap_or(1) as u16;
+    (spacing, (0..).zip(string.char_indices()).map(move |(i, (_, c))| (i as u16 * spacing, c)).collect())
+}
 
+pub fn visible_scrolled(size: usize, length: usize, selected: usize) -> Range<usize> {
     if length <= size {
         return 0..length;
     }
