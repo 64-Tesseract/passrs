@@ -235,8 +235,13 @@ fn main() {
                 password_set.ui_colour %= COLOURS.len();
 
                 enter_alt_screen(&mut stdout);
-                main_ui(&mut password_set, &mut master_pk, copy_cmd);
+                let anything_changed = main_ui(&mut password_set, &mut master_pk, copy_cmd);
                 exit_alt_screen(&mut stdout);
+
+                if !anything_changed {
+                    eprintln!("Nothing changed, not saving");
+                    process::exit(0);
+                }
 
                 password_set.pass.retain(|p| !p.delete);
                 password_set.totp.retain(|t| !t.delete);
@@ -267,7 +272,7 @@ fn main() {
     }
 }
 
-fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy_cmd: String) {
+fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy_cmd: String) -> bool {
     let mut stdout = stdout();
 
     use event::KeyCode;
@@ -277,6 +282,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
     let mut totp_last_time: u64 = 0;
     let mut pass_scroll: usize = 0;
     let mut totp_scroll: usize = 0;
+    let mut anything_changed = false;
 
     'ui: loop {
         let size = terminal::size().unwrap();
@@ -407,7 +413,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
             let keyev = ui::input_key(&ev);
 
             match keyev {
-                KeyCode::Esc | KeyCode::Char('q') => break 'ui,
+                KeyCode::Esc | KeyCode::Char('q') => break 'ui anything_changed,
                 KeyCode::Tab => {
                     tab = match tab { Tab::Password => Tab::Totp, Tab::Totp => Tab::Password };
                 },
@@ -421,6 +427,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                         Tab::Password => shift_item::<pass::Password>(&mut password_set.pass, &mut pass_scroll, true),
                         Tab::Totp => shift_item::<totp::TotpCode>(&mut password_set.totp, &mut totp_scroll, true),
                     }
+                    anything_changed = true;
                 },
                 KeyCode::Down | KeyCode::Char('j') => {
                     if list_length != 0 && *list_scroll < list_length - 1 {
@@ -432,6 +439,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                         Tab::Password => shift_item::<pass::Password>(&mut password_set.pass, &mut pass_scroll, false),
                         Tab::Totp => shift_item::<totp::TotpCode>(&mut password_set.totp, &mut totp_scroll, false),
                     }
+                    anything_changed = true;
                 },
                 KeyCode::Home | KeyCode::Char('g') => {
                     *list_scroll = 0;
@@ -441,8 +449,14 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                 },
                 KeyCode::Char('p') => {
                     match master_pass_ui() {
-                        MasterPassResult::Password(pass) => { *master_pk = Some(generate_orion_key(&pass).unwrap()); },
-                        MasterPassResult::NoPassword => { *master_pk = None; },
+                        MasterPassResult::Password(pass) => {
+                            *master_pk = Some(generate_orion_key(&pass).unwrap());
+                            anything_changed = true;
+                        },
+                        MasterPassResult::NoPassword => {
+                            *master_pk = None;
+                            anything_changed = true;
+                        },
                         MasterPassResult::Cancel => {},
                     }
                 },
@@ -454,6 +468,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                 },
                 KeyCode::Char('c') => {
                     password_set.ui_colour = (password_set.ui_colour + 1) % COLOURS.len();
+                    anything_changed = true;
                 },
                 KeyCode::Char('y') => {
                     if list_length != 0 {
@@ -477,6 +492,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                                 password_set.totp[totp_scroll].delete = !password_set.totp[totp_scroll].delete;
                             },
                         }
+                        anything_changed = true;
                     }
                 },
                 KeyCode::Char('e') => {
@@ -491,6 +507,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                                     EditMenuValue::String("Password", &mut temp_pass.password),
                                 ], COLOURS[password_set.ui_colour]) {
                                     *this_pass = temp_pass;
+                                    anything_changed = true;
                                 }
                             }
                         },
@@ -508,6 +525,7 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                                     temp_totp.set_secret_string(temp_secret);
                                     temp_totp.calculate_codes();
                                     *this_totp = temp_totp;
+                                    anything_changed = true;
                                 }
                             }
                         },
@@ -531,6 +549,8 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                                 if password_set.pass.len() != 1 {
                                     pass_scroll += 1;
                                 }
+
+                                anything_changed = true;
                             }
                         },
                         Tab::Totp => {
@@ -553,6 +573,8 @@ fn main_ui(password_set: &mut Passwords, master_pk: &mut Option<SecretKey>, copy
                                 if password_set.totp.len() != 1 {
                                     totp_scroll += 1;
                                 }
+
+                                anything_changed = true;
                             }
                         },
                     }
