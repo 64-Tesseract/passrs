@@ -34,7 +34,7 @@ I won't go over every detail, since `passrs --help` should tell you all you need
 - **How secure are the encrypted passwords/2FA codes?**  
   I wouldn't bet much on the security if glowies got their hands on it, but it should be enough to stop the average Kali "hacker". Refer to [some "onion" library I use](https://docs.rs/orion/0.15.5/orion/index.html) for actual details.
 - **Do Unicode passwords even work in websites? How are weird characters handled by server software?**  
-  After using `passrs` personally, I can say that the vast majority don't support even Unicode - Steam seems to be the worst offender.  
+  After using `passrs` personally, I can say that the vast majority don't support much besides ASCII - Steam seems to be the worst offender.  
   Some websites partially support Unicode, but give vague errors - usually, there's too many bytes in the password, so trimming it down by half seems to do the trick.  
   Revolt, being a fellow Rust-based app, supports long Unicode passwords just fine :gigachad:
 - **How about clipboard for Wayland?**  
